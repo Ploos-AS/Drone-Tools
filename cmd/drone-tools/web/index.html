@@ -36,9 +36,9 @@
 
   <section class="card">
     <h2>Flight Workspace</h2>
-    <p>Load GPX, PX4 ULog, KML or GeoJSON to render a flight locally. GPX and ULog also get Flight Analysis with distance, duration, speed, elevation and available battery telemetry.</p>
+    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, KML or GeoJSON to render a flight locally. GPX, ULog and DataFlash also get Flight Analysis with distance, duration, speed, elevation and available battery telemetry.</p>
     <form id="flight-form">
-      <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.kml,.geojson,.json" required>
+      <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.bin,.kml,.geojson,.json" required>
       <button type="submit">Analyze flight</button>
     </form>
     <p id="flight-meta" class="meta">Select a supported flight file. No map tiles, CDN or external service is contacted.</p>
@@ -54,7 +54,7 @@
 
       <aside id="analysis-panel">
         <h2>Flight Analysis</h2>
-        <p id="analysis-status" class="meta">GPX or PX4 ULog analysis appears here.</p>
+        <p id="analysis-status" class="meta">GPX, PX4 ULog or ArduPilot DataFlash analysis appears here.</p>
         <div id="analysis-content" class="hidden">
           <p>Data quality: <span id="quality" class="quality">—</span></p>
           <div class="metrics">
@@ -118,12 +118,12 @@ document.getElementById('flight-form').addEventListener('submit', async (event) 
     const vertices = doc.paths.reduce((n, path) => n + path.length, 0);
     meta.textContent = `${doc.format.toUpperCase()} · ${doc.paths.length} path(s) · ${vertices} track vertices · ${doc.points.length} waypoint(s) · bounds ${formatBounds(doc.bounds)}`;
 
-    if (doc.format === 'gpx' || doc.format === 'px4-ulog') {
+    if (doc.format === 'gpx' || doc.format === 'px4-ulog' || doc.format === 'ardupilot-dataflash') {
       document.getElementById('analysis-status').textContent = 'Calculating flight metrics…';
       const analysis = await postFile('/api/v1/analyze', file);
       renderAnalysis(analysis, doc.format);
     } else {
-      document.getElementById('analysis-status').textContent = 'This format is mapped only; telemetry analysis is currently available for GPX and PX4 ULog.';
+      document.getElementById('analysis-status').textContent = 'This format is mapped only; telemetry analysis is currently available for GPX, PX4 ULog and ArduPilot DataFlash.';
     }
   } catch (error) {
     clearMap();
@@ -143,12 +143,14 @@ async function postFile(url, file) {
 
 function clearAnalysis() {
   document.getElementById('analysis-content').classList.add('hidden');
-  document.getElementById('analysis-status').textContent = 'GPX or PX4 ULog analysis appears here.';
+  document.getElementById('analysis-status').textContent = 'GPX, PX4 ULog or ArduPilot DataFlash analysis appears here.';
   document.getElementById('warnings').replaceChildren();
 }
 
 function renderAnalysis(a, format) {
-  const source = format === 'px4-ulog' ? 'PX4 ULog telemetry' : 'GPX track';
+  let source = 'GPX track';
+  if (format === 'px4-ulog') source = 'PX4 ULog telemetry';
+  if (format === 'ardupilot-dataflash') source = 'ArduPilot DataFlash telemetry';
   document.getElementById('analysis-status').textContent = `Derived locally from the uploaded ${source}.`;
   document.getElementById('analysis-content').classList.remove('hidden');
   document.getElementById('quality').textContent = a.quality || 'unknown';
