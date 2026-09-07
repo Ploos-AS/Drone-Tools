@@ -12,6 +12,7 @@ import (
 	geodata "github.com/Ploos-AS/Drone-Tools/internal/geo"
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
+	"github.com/Ploos-AS/Drone-Tools/internal/mapdata"
 )
 
 func TestHealthz(t *testing.T) {
@@ -47,8 +48,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M1.2" {
-		t.Fatalf("stage = %v, want M1.2", response["stage"])
+	if response["stage"] != "M1.3" {
+		t.Fatalf("stage = %v, want M1.3", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -143,6 +144,25 @@ func TestGeoJSONSummaryEndpoint(t *testing.T) {
 	}
 	if summary.Format != "geojson" || summary.Features != 1 || summary.LineStrings != 1 || summary.Coordinates != 2 {
 		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestMapEndpoint(t *testing.T) {
+	handler, err := newHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := `<gpx><wpt lat="58" lon="7"/><trk><trkseg><trkpt lat="58" lon="7"/><trkpt lat="58.1" lon="7.2"/></trkseg></trk></gpx>`
+	rr := postFile(t, handler, "/api/v1/map", "flight.gpx", content)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var doc mapdata.Document
+	if err := json.NewDecoder(rr.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Format != "gpx" || len(doc.Paths) != 1 || len(doc.Points) != 1 || doc.Bounds == nil {
+		t.Fatalf("unexpected map document: %+v", doc)
 	}
 }
 
