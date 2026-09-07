@@ -13,6 +13,13 @@ import (
 	"github.com/Ploos-AS/Drone-Tools/internal/ulog"
 )
 
+const (
+	maxHDOP                = 2.5
+	maxVDOP                = 3.5
+	maxHorizontalAccuracyM = 5.0
+	maxVerticalAccuracyM   = 8.0
+)
+
 func flightHealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -73,6 +80,14 @@ func healthInputFromULog(telemetry ulog.Telemetry) health.Input {
 		if sample.SatellitesUsed < 6 {
 			in.GPS.LowSatelliteSamples++
 		}
+		if sample.HorizontalAccuracyM != nil || sample.VerticalAccuracyM != nil {
+			in.GPS.PrecisionQualitySamples++
+			poor := sample.HorizontalAccuracyM != nil && *sample.HorizontalAccuracyM > maxHorizontalAccuracyM
+			poor = poor || sample.VerticalAccuracyM != nil && *sample.VerticalAccuracyM > maxVerticalAccuracyM
+			if poor {
+				in.GPS.PoorPrecisionSamples++
+			}
+		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousULogTimestamp(telemetry.GPS, i))
 		if sample.TimestampUS > 0 {
 			timestamps = append(timestamps, sample.TimestampUS)
@@ -96,6 +111,12 @@ func healthInputFromDataFlash(telemetry dataflash.Telemetry) health.Input {
 		}
 		if sample.Satellites < 6 {
 			in.GPS.LowSatelliteSamples++
+		}
+		if sample.HDOP != nil {
+			in.GPS.PrecisionQualitySamples++
+			if *sample.HDOP > maxHDOP {
+				in.GPS.PoorPrecisionSamples++
+			}
 		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousDataFlashTimestamp(telemetry.GPS, i))
 		if sample.TimestampUS > 0 {
@@ -121,6 +142,14 @@ func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 			}
 			if sample.Satellites < 6 {
 				in.GPS.LowSatelliteSamples++
+			}
+			if sample.HDOP != nil || sample.VDOP != nil {
+				in.GPS.PrecisionQualitySamples++
+				poor := sample.HDOP != nil && *sample.HDOP > maxHDOP
+				poor = poor || sample.VDOP != nil && *sample.VDOP > maxVDOP
+				if poor {
+					in.GPS.PoorPrecisionSamples++
+				}
 			}
 		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousTLOGTimestamp(telemetry.GPS, i))
