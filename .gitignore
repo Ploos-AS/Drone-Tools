@@ -1,0 +1,4 @@
+/drone-tools
+/data/
+*.tmp
+.DS_Store
