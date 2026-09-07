@@ -240,7 +240,8 @@ func decodeCoreTelemetry(out *Telemetry, name string, def formatDef, data []byte
 		s := GPSSample{Latitude: scaledCoordinate(lat), Longitude: scaledCoordinate(lon)}
 		s.TimestampUS = uint64Value(def, data, "timestamp")
 		if alt, ok := number(def, data, "alt"); ok {
-			s.AltitudeMeters = scaledAltitude(alt)
+			// PX4 vehicle_gps_position.alt is millimetres above MSL.
+			s.AltitudeMeters = alt / 1000
 		}
 		if vel, ok := number(def, data, "vel_m_s"); ok {
 			s.VelocityMPS = vel
@@ -278,13 +279,6 @@ func firstNumber(def formatDef, data []byte, names ...string) (float64, bool) {
 func scaledCoordinate(v float64) float64 {
 	if math.Abs(v) > 180 {
 		return v / 1e7
-	}
-	return v
-}
-
-func scaledAltitude(v float64) float64 {
-	if math.Abs(v) > 100000 {
-		return v / 1000
 	}
 	return v
 }
