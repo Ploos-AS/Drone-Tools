@@ -20,6 +20,14 @@ func TestFlightHealthTLOG(t *testing.T) {
 	assertFlightHealth(t, "flight.tlog", buildTLOGWorkspaceFixture())
 }
 
+func TestAccumulateGPSGaps(t *testing.T) {
+	var gps health.GPSInput
+	accumulateGPSGaps(&gps, []uint64{1_000_000, 2_000_000, 3_000_000, 20_000_000, 21_000_000})
+	if gps.GapEvents != 1 || gps.MaxGapSeconds != 17 {
+		t.Fatalf("unexpected gap detection: %+v", gps)
+	}
+}
+
 func TestFlightHealthRejectsUnsupportedFormat(t *testing.T) {
 	handler, _ := newHandler(t.TempDir())
 	rr := postFile(t, handler, "/api/v1/health", "flight.gpx", "<gpx></gpx>")
@@ -39,7 +47,7 @@ func assertFlightHealth(t *testing.T, filename, fixture string) {
 	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Algorithm != "m3.0-deterministic-v1" {
+	if result.Algorithm != "m3.3-deterministic-v2" {
 		t.Fatalf("algorithm = %q", result.Algorithm)
 	}
 	if result.Score != 100 || result.Status != "good" {
