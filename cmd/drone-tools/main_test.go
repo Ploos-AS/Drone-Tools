@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ploos-AS/Drone-Tools/internal/dataflash"
 	geodata "github.com/Ploos-AS/Drone-Tools/internal/geo"
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
@@ -49,8 +50,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M2.2" {
-		t.Fatalf("stage = %v, want M2.2", response["stage"])
+	if response["stage"] != "M2.4" {
+		t.Fatalf("stage = %v, want M2.4", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -69,7 +70,7 @@ func TestIndex(t *testing.T) {
 	}
 	body := rr.Body.String()
 	if !strings.Contains(body, "Drone-Tools") || !strings.Contains(body, "Flight Analysis") || !strings.Contains(body, ".ulg") {
-		t.Fatal("index response does not contain M2.2 workspace UI")
+		t.Fatal("index response does not contain flight workspace UI")
 	}
 }
 
@@ -178,6 +179,52 @@ func TestULogAnalyzeEndpoint(t *testing.T) {
 	}
 }
 
+func TestDataFlashTelemetryEndpoint(t *testing.T) {
+	handler, _ := newHandler(t.TempDir())
+	rr := postFile(t, handler, "/api/v1/dataflash/telemetry", "flight.bin", buildDataFlashFixture(t))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summary dataflash.Summary
+	if err := json.NewDecoder(rr.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Telemetry.GPS) != 2 || len(summary.Telemetry.Battery) != 1 || summary.Telemetry.GPS[0].Latitude != 58 {
+		t.Fatalf("unexpected DataFlash telemetry: %+v", summary.Telemetry)
+	}
+}
+
+func TestDataFlashWorkspaceEndpoints(t *testing.T) {
+	handler, _ := newHandler(t.TempDir())
+	fixture := buildDataFlashFixture(t)
+	mapRR := postFile(t, handler, "/api/v1/map", "flight.bin", fixture)
+	if mapRR.Code != http.StatusOK {
+		t.Fatalf("map status = %d body=%s", mapRR.Code, mapRR.Body.String())
+	}
+	var doc mapdata.Document
+	if err := json.NewDecoder(mapRR.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Format != "ardupilot-dataflash" || len(doc.Paths) != 1 || len(doc.Paths[0]) != 2 {
+		t.Fatalf("unexpected DataFlash map: %+v", doc)
+	}
+
+	analysisRR := postFile(t, handler, "/api/v1/analyze", "flight.bin", fixture)
+	if analysisRR.Code != http.StatusOK {
+		t.Fatalf("analysis status = %d body=%s", analysisRR.Code, analysisRR.Body.String())
+	}
+	var analysis flightAnalysis
+	if err := json.NewDecoder(analysisRR.Body).Decode(&analysis); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.TrackPoints != 2 || analysis.DistanceMeters <= 0 || analysis.DurationSeconds == nil || analysis.BatteryVoltageV == nil {
+		t.Fatalf("unexpected DataFlash analysis: %+v", analysis)
+	}
+	if math.Abs(*analysis.BatteryVoltageV-15.2) > 1e-5 || math.Abs(analysis.ElevationGainMeters-2) > 1e-6 {
+		t.Fatalf("unexpected DataFlash metrics: %+v", analysis)
+	}
+}
+
 func TestKMLSummaryEndpoint(t *testing.T) {
 	handler, _ := newHandler(t.TempDir())
 	content := `<kml><Document><Placemark><LineString><coordinates>7,58,10 7.1,58.1,20</coordinates></LineString></Placemark></Document></kml>`
@@ -264,6 +311,45 @@ func buildULogFixture(t *testing.T) string {
 	_ = binary.Write(&battery, binary.LittleEndian, float32(0.75))
 	writeULogMessage(&b, 'D', battery.Bytes())
 	return b.String()
+}
+
+func buildDataFlashFixture(t *testing.T) string {
+	t.Helper()
+	var b bytes.Buffer
+	b.Write(dataFlashFormatFrame(42, 29, "GPS", "QLLffBB", "TimeUS,Lat,Lng,Alt,Spd,Status,NSats"))
+	writeDataFlashGPS(t, &b, 42, 1000000, 580000000, 70000000, 100, 10, 3, 12)
+	writeDataFlashGPS(t, &b, 42, 3000000, 580010000, 70020000, 102, 12, 3, 11)
+	b.Write(dataFlashFormatFrame(43, 20, "BAT", "QffB", "TimeUS,Volt,Curr,RemPct"))
+	var bat bytes.Buffer
+	bat.Write([]byte{0xA3, 0x95, 43})
+	_ = binary.Write(&bat, binary.LittleEndian, uint64(3000000))
+	_ = binary.Write(&bat, binary.LittleEndian, float32(15.2))
+	_ = binary.Write(&bat, binary.LittleEndian, float32(6.5))
+	bat.WriteByte(75)
+	b.Write(bat.Bytes())
+	return b.String()
+}
+
+func dataFlashFormatFrame(typ, length byte, name, format, columns string) []byte {
+	frame := make([]byte, 89)
+	frame[0], frame[1], frame[2] = 0xA3, 0x95, 128
+	frame[3], frame[4] = typ, length
+	copy(frame[5:9], name)
+	copy(frame[9:25], format)
+	copy(frame[25:89], columns)
+	return frame
+}
+
+func writeDataFlashGPS(t *testing.T, b *bytes.Buffer, typ byte, timestamp uint64, lat, lon int32, alt, speed float32, status, satellites byte) {
+	t.Helper()
+	b.Write([]byte{0xA3, 0x95, typ})
+	_ = binary.Write(b, binary.LittleEndian, timestamp)
+	_ = binary.Write(b, binary.LittleEndian, lat)
+	_ = binary.Write(b, binary.LittleEndian, lon)
+	_ = binary.Write(b, binary.LittleEndian, alt)
+	_ = binary.Write(b, binary.LittleEndian, speed)
+	b.WriteByte(status)
+	b.WriteByte(satellites)
 }
 
 func writeGPSData(t *testing.T, b *bytes.Buffer, id uint16, timestamp uint64, lat, lon, alt int32, speed float32, fix, satellites byte) {
