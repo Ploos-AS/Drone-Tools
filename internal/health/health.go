@@ -6,8 +6,10 @@ type GPSInput struct {
 	Samples                 int
 	FixQualitySamples       int
 	SatelliteQualitySamples int
+	PrecisionQualitySamples int
 	LowFixSamples           int
 	LowSatelliteSamples     int
+	PoorPrecisionSamples    int
 	GapEvents               int
 	MaxGapSeconds           float64
 }
@@ -62,7 +64,7 @@ func Evaluate(in Input) Result {
 		GPS:       gps,
 		Battery:   battery,
 		Data:      data,
-		Algorithm: "m3.3-deterministic-v2",
+		Algorithm: "m3.4-deterministic-v3",
 	}
 	result.Findings = append(result.Findings, gps.Findings...)
 	result.Findings = append(result.Findings, battery.Findings...)
@@ -94,7 +96,16 @@ func evaluateGPS(in GPSInput) Component {
 		}
 		ratio := float64(in.LowSatelliteSamples) / float64(denominator)
 		c.Score -= penaltyByRatio(ratio, 5, 15, 30)
-		c.Findings = append(c.Findings, "GPS includes samples with fewer than 6 satellites")
+		c.Findings = append(c.Findings, "GPS includes samples with poor reported precision")
+	}
+	if in.PoorPrecisionSamples > 0 {
+		denominator := in.PrecisionQualitySamples
+		if denominator == 0 {
+			denominator = in.Samples
+		}
+		ratio := float64(in.PoorPrecisionSamples) / float64(denominator)
+		c.Score -= penaltyByRatio(ratio, 5, 15, 25)
+		c.Findings = append(c.Findings, "GPS precision metrics exceed format-specific thresholds")
 	}
 	if in.GapEvents > 0 {
 		switch {
