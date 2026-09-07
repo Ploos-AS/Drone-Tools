@@ -26,6 +26,12 @@
     .quality { display: inline-block; padding: .25rem .55rem; border-radius: 999px; background: #374151; }
     .warnings { padding-left: 1.2rem; }
     .hidden { display: none; }
+    .health-summary { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 2fr); gap: 1rem; margin-top: 1rem; }
+    .health-score { background: #111827; border-radius: .75rem; padding: 1rem; text-align: center; }
+    .health-score strong { display: block; font-size: 3rem; line-height: 1; margin: .35rem 0; }
+    .health-components { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }
+    .health-component { background: #111827; border-radius: .75rem; padding: .9rem; }
+    .health-component strong { display: block; font-size: 1.5rem; margin-top: .25rem; }
     .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.25rem; }
     .chart-card { background: #111827; padding: 1rem; border-radius: .75rem; }
     .chart-card h3 { margin-top: 0; }
@@ -33,7 +39,7 @@
     .chart-grid { stroke: #263244; stroke-width: 1; }
     .chart-line { fill: none; stroke: #a7f3d0; stroke-width: 2; vector-effect: non-scaling-stroke; }
     .chart-label { fill: #9ca3af; font-size: 11px; }
-    @media (max-width: 800px) { .workspace, .charts { grid-template-columns: 1fr; } }
+    @media (max-width: 800px) { .workspace, .charts, .health-summary, .health-components { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -43,7 +49,7 @@
 
   <section class="card">
     <h2>Flight Workspace</h2>
-    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, MAVLink TLOG, KML or GeoJSON to render a flight locally. GPX, ULog, DataFlash and TLOG also get Flight Analysis and local telemetry charts.</p>
+    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, MAVLink TLOG, KML or GeoJSON to render a flight locally. GPX, ULog, DataFlash and TLOG also get Flight Analysis and local telemetry charts. ULog, DataFlash and TLOG additionally get deterministic Flight Health scoring.</p>
     <form id="flight-form">
       <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.bin,.tlog,.kml,.geojson,.json" required>
       <button type="submit">Analyze flight</button>
@@ -82,6 +88,22 @@
         </div>
       </aside>
     </div>
+
+    <section id="health-panel" class="hidden">
+      <h2>Flight Health</h2>
+      <p id="health-status" class="meta">Deterministic, explainable scoring from the uploaded telemetry.</p>
+      <div class="health-summary">
+        <div class="health-score">Overall<strong id="health-score">—</strong><span id="health-overall-status" class="quality">—</span></div>
+        <div class="health-components">
+          <div class="health-component">GPS<strong id="health-gps-score">—</strong><span id="health-gps-status" class="meta">—</span></div>
+          <div class="health-component">Battery<strong id="health-battery-score">—</strong><span id="health-battery-status" class="meta">—</span></div>
+          <div class="health-component">Data quality<strong id="health-data-score">—</strong><span id="health-data-status" class="meta">—</span></div>
+        </div>
+      </div>
+      <h3>Findings</h3>
+      <ul id="health-findings" class="warnings"></ul>
+      <p id="health-algorithm" class="meta"></p>
+    </section>
 
     <section id="charts-panel" class="hidden">
       <h2>Telemetry Charts</h2>
@@ -129,6 +151,7 @@ document.getElementById('flight-form').addEventListener('submit', async (event) 
   const meta = document.getElementById('flight-meta');
   meta.textContent = 'Parsing flight…';
   clearAnalysis();
+  clearHealth();
   clearCharts();
 
   try {
@@ -143,6 +166,12 @@ document.getElementById('flight-form').addEventListener('submit', async (event) 
       document.getElementById('analysis-status').textContent = 'Calculating flight metrics…';
       const analysis = await postFile('/api/v1/analyze', file);
       renderAnalysis(analysis, doc.format);
+      if (['px4-ulog', 'ardupilot-dataflash', 'mavlink-tlog'].includes(doc.format)) {
+        document.getElementById('health-panel').classList.remove('hidden');
+        document.getElementById('health-status').textContent = 'Calculating deterministic Flight Health score…';
+        const health = await postFile('/api/v1/health', file);
+        renderHealth(health);
+      }
       await renderChartsForFile(file, doc.format);
     } else {
       document.getElementById('analysis-status').textContent = 'This format is mapped only; telemetry analysis is currently available for GPX, PX4 ULog, ArduPilot DataFlash and MAVLink TLOG.';
@@ -150,6 +179,7 @@ document.getElementById('flight-form').addEventListener('submit', async (event) 
   } catch (error) {
     clearMap();
     clearAnalysis();
+    clearHealth();
     clearCharts();
     meta.textContent = `Error: ${error.message}`;
   }
@@ -203,6 +233,42 @@ function renderAnalysis(a, format) {
       li.textContent = warning;
       warnings.appendChild(li);
     }
+  }
+}
+
+function clearHealth() {
+  document.getElementById('health-panel').classList.add('hidden');
+  document.getElementById('health-findings').replaceChildren();
+  document.getElementById('health-status').textContent = 'Deterministic, explainable scoring from the uploaded telemetry.';
+  document.getElementById('health-algorithm').textContent = '';
+}
+
+function renderHealth(h) {
+  document.getElementById('health-panel').classList.remove('hidden');
+  document.getElementById('health-status').textContent = 'Derived locally from telemetry using fixed, versioned scoring rules.';
+  document.getElementById('health-score').textContent = `${h.score ?? 0}/100`;
+  document.getElementById('health-overall-status').textContent = h.status || 'unknown';
+  document.getElementById('health-gps-score').textContent = `${h.gps?.score ?? 0}/100`;
+  document.getElementById('health-gps-status').textContent = h.gps?.status || 'unknown';
+  document.getElementById('health-battery-score').textContent = `${h.battery?.score ?? 0}/100`;
+  document.getElementById('health-battery-status').textContent = h.battery?.status || 'unknown';
+  document.getElementById('health-data-score').textContent = `${h.data_quality?.score ?? 0}/100`;
+  document.getElementById('health-data-status').textContent = h.data_quality?.status || 'unknown';
+  document.getElementById('health-algorithm').textContent = h.algorithm ? `Scoring algorithm: ${h.algorithm}` : '';
+
+  const findings = document.getElementById('health-findings');
+  findings.replaceChildren();
+  const items = h.findings || [];
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.textContent = 'No Flight Health findings.';
+    findings.appendChild(li);
+    return;
+  }
+  for (const finding of items) {
+    const li = document.createElement('li');
+    li.textContent = finding;
+    findings.appendChild(li);
   }
 }
 
