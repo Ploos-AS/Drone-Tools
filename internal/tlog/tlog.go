@@ -31,14 +31,16 @@ type Endpoint struct {
 }
 
 type GPSSample struct {
-	Source         string  `json:"source"`
-	TimestampUS    uint64  `json:"timestamp_us,omitempty"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AltitudeMeters float64 `json:"altitude_m,omitempty"`
-	SpeedMPS       float64 `json:"speed_mps,omitempty"`
-	FixType        uint8   `json:"fix_type,omitempty"`
-	Satellites     uint8   `json:"satellites,omitempty"`
+	Source         string   `json:"source"`
+	TimestampUS    uint64   `json:"timestamp_us,omitempty"`
+	Latitude       float64  `json:"latitude"`
+	Longitude      float64  `json:"longitude"`
+	AltitudeMeters float64  `json:"altitude_m,omitempty"`
+	SpeedMPS       float64  `json:"speed_mps,omitempty"`
+	FixType        uint8    `json:"fix_type,omitempty"`
+	Satellites     uint8    `json:"satellites,omitempty"`
+	HDOP           *float64 `json:"hdop,omitempty"`
+	VDOP           *float64 `json:"vdop,omitempty"`
 }
 
 type BatterySample struct {
@@ -160,7 +162,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		if !validCoordinate(lat, lon) {
 			return
 		}
-		out.GPS = append(out.GPS, GPSSample{
+		sample := GPSSample{
 			Source:         "GPS_RAW_INT",
 			TimestampUS:    timestamp,
 			Latitude:       lat,
@@ -169,7 +171,16 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 			SpeedMPS:       float64(binary.LittleEndian.Uint16(payload[25:27])) / 100,
 			FixType:        payload[8],
 			Satellites:     payload[29],
-		})
+		}
+		if eph := binary.LittleEndian.Uint16(payload[21:23]); eph != 0xffff {
+			v := float64(eph) / 100
+			sample.HDOP = &v
+		}
+		if epv := binary.LittleEndian.Uint16(payload[23:25]); epv != 0xffff {
+			v := float64(epv) / 100
+			sample.VDOP = &v
+		}
+		out.GPS = append(out.GPS, sample)
 	case msgGlobalPositionInt:
 		if len(payload) < 28 {
 			return
