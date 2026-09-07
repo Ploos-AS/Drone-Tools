@@ -26,7 +26,14 @@
     .quality { display: inline-block; padding: .25rem .55rem; border-radius: 999px; background: #374151; }
     .warnings { padding-left: 1.2rem; }
     .hidden { display: none; }
-    @media (max-width: 800px) { .workspace { grid-template-columns: 1fr; } }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.25rem; }
+    .chart-card { background: #111827; padding: 1rem; border-radius: .75rem; }
+    .chart-card h3 { margin-top: 0; }
+    .chart { width: 100%; height: 190px; background: #0b1220; border-radius: .5rem; }
+    .chart-grid { stroke: #263244; stroke-width: 1; }
+    .chart-line { fill: none; stroke: #a7f3d0; stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .chart-label { fill: #9ca3af; font-size: 11px; }
+    @media (max-width: 800px) { .workspace, .charts { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -36,9 +43,9 @@
 
   <section class="card">
     <h2>Flight Workspace</h2>
-    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, KML or GeoJSON to render a flight locally. GPX, ULog and DataFlash also get Flight Analysis with distance, duration, speed, elevation and available battery telemetry.</p>
+    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, MAVLink TLOG, KML or GeoJSON to render a flight locally. GPX, ULog, DataFlash and TLOG also get Flight Analysis and local telemetry charts.</p>
     <form id="flight-form">
-      <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.bin,.kml,.geojson,.json" required>
+      <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.bin,.tlog,.kml,.geojson,.json" required>
       <button type="submit">Analyze flight</button>
     </form>
     <p id="flight-meta" class="meta">Select a supported flight file. No map tiles, CDN or external service is contacted.</p>
@@ -54,7 +61,7 @@
 
       <aside id="analysis-panel">
         <h2>Flight Analysis</h2>
-        <p id="analysis-status" class="meta">GPX, PX4 ULog or ArduPilot DataFlash analysis appears here.</p>
+        <p id="analysis-status" class="meta">GPX, PX4 ULog, ArduPilot DataFlash or MAVLink TLOG analysis appears here.</p>
         <div id="analysis-content" class="hidden">
           <p>Data quality: <span id="quality" class="quality">—</span></p>
           <div class="metrics">
@@ -75,6 +82,17 @@
         </div>
       </aside>
     </div>
+
+    <section id="charts-panel" class="hidden">
+      <h2>Telemetry Charts</h2>
+      <p id="charts-status" class="meta">Charts are rendered locally in your browser from the uploaded flight data.</p>
+      <div class="charts">
+        <div class="chart-card"><h3>Altitude</h3><svg id="chart-altitude" class="chart" viewBox="0 0 640 190" aria-label="Altitude chart"></svg></div>
+        <div class="chart-card"><h3>Speed</h3><svg id="chart-speed" class="chart" viewBox="0 0 640 190" aria-label="Speed chart"></svg></div>
+        <div class="chart-card"><h3>Battery voltage</h3><svg id="chart-voltage" class="chart" viewBox="0 0 640 190" aria-label="Battery voltage chart"></svg></div>
+        <div class="chart-card"><h3>Battery remaining</h3><svg id="chart-remaining" class="chart" viewBox="0 0 640 190" aria-label="Battery remaining chart"></svg></div>
+      </div>
+    </section>
   </section>
 
   <section class="card">
@@ -111,23 +129,28 @@ document.getElementById('flight-form').addEventListener('submit', async (event) 
   const meta = document.getElementById('flight-meta');
   meta.textContent = 'Parsing flight…';
   clearAnalysis();
+  clearCharts();
 
   try {
     const doc = await postFile('/api/v1/map', file);
     renderMap(doc);
-    const vertices = doc.paths.reduce((n, path) => n + path.length, 0);
-    meta.textContent = `${doc.format.toUpperCase()} · ${doc.paths.length} path(s) · ${vertices} track vertices · ${doc.points.length} waypoint(s) · bounds ${formatBounds(doc.bounds)}`;
+    const paths = doc.paths || [];
+    const points = doc.points || [];
+    const vertices = paths.reduce((n, path) => n + path.length, 0);
+    meta.textContent = `${doc.format.toUpperCase()} · ${paths.length} path(s) · ${vertices} track vertices · ${points.length} waypoint(s) · bounds ${formatBounds(doc.bounds)}`;
 
-    if (doc.format === 'gpx' || doc.format === 'px4-ulog' || doc.format === 'ardupilot-dataflash') {
+    if (['gpx', 'px4-ulog', 'ardupilot-dataflash', 'mavlink-tlog'].includes(doc.format)) {
       document.getElementById('analysis-status').textContent = 'Calculating flight metrics…';
       const analysis = await postFile('/api/v1/analyze', file);
       renderAnalysis(analysis, doc.format);
+      await renderChartsForFile(file, doc.format);
     } else {
-      document.getElementById('analysis-status').textContent = 'This format is mapped only; telemetry analysis is currently available for GPX, PX4 ULog and ArduPilot DataFlash.';
+      document.getElementById('analysis-status').textContent = 'This format is mapped only; telemetry analysis is currently available for GPX, PX4 ULog, ArduPilot DataFlash and MAVLink TLOG.';
     }
   } catch (error) {
     clearMap();
     clearAnalysis();
+    clearCharts();
     meta.textContent = `Error: ${error.message}`;
   }
 });
@@ -143,7 +166,7 @@ async function postFile(url, file) {
 
 function clearAnalysis() {
   document.getElementById('analysis-content').classList.add('hidden');
-  document.getElementById('analysis-status').textContent = 'GPX, PX4 ULog or ArduPilot DataFlash analysis appears here.';
+  document.getElementById('analysis-status').textContent = 'GPX, PX4 ULog, ArduPilot DataFlash or MAVLink TLOG analysis appears here.';
   document.getElementById('warnings').replaceChildren();
 }
 
@@ -151,6 +174,7 @@ function renderAnalysis(a, format) {
   let source = 'GPX track';
   if (format === 'px4-ulog') source = 'PX4 ULog telemetry';
   if (format === 'ardupilot-dataflash') source = 'ArduPilot DataFlash telemetry';
+  if (format === 'mavlink-tlog') source = 'MAVLink TLOG telemetry';
   document.getElementById('analysis-status').textContent = `Derived locally from the uploaded ${source}.`;
   document.getElementById('analysis-content').classList.remove('hidden');
   document.getElementById('quality').textContent = a.quality || 'unknown';
@@ -182,6 +206,133 @@ function renderAnalysis(a, format) {
   }
 }
 
+async function renderChartsForFile(file, format) {
+  let series;
+  if (format === 'gpx') {
+    series = await gpxSeries(file);
+  } else {
+    const endpoint = format === 'px4-ulog' ? '/api/v1/ulog/telemetry' : format === 'ardupilot-dataflash' ? '/api/v1/dataflash/telemetry' : '/api/v1/tlog/telemetry';
+    const summary = await postFile(endpoint, file);
+    series = telemetrySeries(summary.telemetry || {});
+  }
+  document.getElementById('charts-panel').classList.remove('hidden');
+  document.getElementById('charts-status').textContent = `Rendered locally · ${series.altitude.length} altitude · ${series.speed.length} speed · ${series.voltage.length} voltage · ${series.remaining.length} remaining samples.`;
+  renderChart('chart-altitude', series.altitude, 'm');
+  renderChart('chart-speed', series.speed, 'm/s');
+  renderChart('chart-voltage', series.voltage, 'V');
+  renderChart('chart-remaining', series.remaining, '%', 100);
+}
+
+function telemetrySeries(telemetry) {
+  const gps = telemetry.gps || [];
+  const battery = telemetry.battery || [];
+  return {
+    altitude: timedSeries(gps, (s) => s.altitude_m),
+    speed: timedSeries(gps, (s) => s.speed_mps ?? s.velocity_mps),
+    voltage: timedSeries(battery, (s) => s.voltage_v),
+    remaining: timedSeries(battery, (s) => s.remaining)
+  };
+}
+
+function timedSeries(samples, valueFn) {
+  if (!samples.length) return [];
+  const firstTimestamp = samples.find((s) => Number.isFinite(Number(s.timestamp_us)) && Number(s.timestamp_us) > 0)?.timestamp_us || 0;
+  const out = [];
+  samples.forEach((sample, index) => {
+    const value = Number(valueFn(sample));
+    if (!Number.isFinite(value)) return;
+    const stamp = Number(sample.timestamp_us || 0);
+    const x = firstTimestamp && stamp ? (stamp - firstTimestamp) / 1e6 : index;
+    out.push({ x, y: value });
+  });
+  return out;
+}
+
+async function gpxSeries(file) {
+  const xml = new DOMParser().parseFromString(await file.text(), 'application/xml');
+  const nodes = [...xml.querySelectorAll('trkpt')];
+  const points = nodes.map((node, index) => {
+    const timeText = node.querySelector('time')?.textContent || '';
+    const parsedTime = timeText ? Date.parse(timeText) : NaN;
+    const ele = Number(node.querySelector('ele')?.textContent);
+    return {
+      index,
+      lat: Number(node.getAttribute('lat')),
+      lon: Number(node.getAttribute('lon')),
+      ele: Number.isFinite(ele) ? ele : null,
+      timeMS: Number.isFinite(parsedTime) ? parsedTime : null
+    };
+  });
+  const firstTime = points.find((p) => p.timeMS != null)?.timeMS ?? null;
+  const altitude = points.filter((p) => p.ele != null).map((p) => ({ x: firstTime != null && p.timeMS != null ? (p.timeMS - firstTime) / 1000 : p.index, y: p.ele }));
+  const speed = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (a.timeMS == null || b.timeMS == null || b.timeMS <= a.timeMS) continue;
+    const seconds = (b.timeMS - a.timeMS) / 1000;
+    speed.push({ x: firstTime != null ? (b.timeMS - firstTime) / 1000 : i, y: browserHaversine(a.lat, a.lon, b.lat, b.lon) / seconds });
+  }
+  return { altitude, speed, voltage: [], remaining: [] };
+}
+
+function browserHaversine(latA, lonA, latB, lonB) {
+  const r = 6371000;
+  const toRad = (v) => v * Math.PI / 180;
+  const dLat = toRad(latB - latA);
+  const dLon = toRad(lonB - lonA);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(latA)) * Math.cos(toRad(latB)) * Math.sin(dLon / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function clearCharts() {
+  document.getElementById('charts-panel').classList.add('hidden');
+  for (const id of ['chart-altitude', 'chart-speed', 'chart-voltage', 'chart-remaining']) document.getElementById(id).replaceChildren();
+}
+
+function renderChart(id, points, unit, multiplier = 1) {
+  const svg = document.getElementById(id);
+  svg.replaceChildren();
+  const clean = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => ({ x: p.x, y: p.y * multiplier }));
+  if (!clean.length) {
+    addChartText(svg, 320, 96, 'No samples', 'middle');
+    return;
+  }
+  const pad = { left: 54, right: 18, top: 14, bottom: 30 };
+  const w = 640 - pad.left - pad.right;
+  const h = 190 - pad.top - pad.bottom;
+  let minX = Math.min(...clean.map((p) => p.x));
+  let maxX = Math.max(...clean.map((p) => p.x));
+  let minY = Math.min(...clean.map((p) => p.y));
+  let maxY = Math.max(...clean.map((p) => p.y));
+  if (maxX === minX) maxX = minX + 1;
+  if (maxY === minY) { minY -= .5; maxY += .5; }
+  const project = (p) => [pad.left + ((p.x - minX) / (maxX - minX)) * w, pad.top + (1 - (p.y - minY) / (maxY - minY)) * h];
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (i / 4) * h;
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('class', 'chart-grid');
+    line.setAttribute('x1', pad.left); line.setAttribute('x2', pad.left + w); line.setAttribute('y1', y); line.setAttribute('y2', y);
+    svg.appendChild(line);
+  }
+  const polyline = document.createElementNS(NS, 'polyline');
+  polyline.setAttribute('class', 'chart-line');
+  polyline.setAttribute('points', clean.map((p) => project(p).join(',')).join(' '));
+  svg.appendChild(polyline);
+  addChartText(svg, 6, pad.top + 8, `${maxY.toFixed(1)} ${unit}`, 'start');
+  addChartText(svg, 6, pad.top + h, `${minY.toFixed(1)} ${unit}`, 'start');
+  addChartText(svg, pad.left, 184, `${minX.toFixed(1)} s`, 'start');
+  addChartText(svg, pad.left + w, 184, `${maxX.toFixed(1)} s`, 'end');
+}
+
+function addChartText(svg, x, y, text, anchor) {
+  const el = document.createElementNS(NS, 'text');
+  el.setAttribute('class', 'chart-label');
+  el.setAttribute('x', x); el.setAttribute('y', y); el.setAttribute('text-anchor', anchor);
+  el.textContent = text;
+  svg.appendChild(el);
+}
+
 function formatDistance(value) {
   if (value == null) return 'n/a';
   return value >= 1000 ? `${(value / 1000).toFixed(2)} km` : `${value.toFixed(0)} m`;
@@ -201,26 +352,11 @@ function formatSpeed(value) {
   return `${value.toFixed(2)} m/s · ${(value * 3.6).toFixed(1)} km/h`;
 }
 
-function formatMeters(value) {
-  return value == null ? 'n/a' : `${value.toFixed(1)} m`;
-}
-
-function formatElevationRange(min, max) {
-  if (min == null || max == null) return 'n/a';
-  return `${min.toFixed(1)}–${max.toFixed(1)} m`;
-}
-
-function formatVolts(value) {
-  return value == null ? 'n/a' : `${value.toFixed(2)} V`;
-}
-
-function formatAmps(value) {
-  return value == null ? 'n/a' : `${value.toFixed(2)} A`;
-}
-
-function formatPercent(value) {
-  return value == null ? 'n/a' : `${(value * 100).toFixed(0)}%`;
-}
+function formatMeters(value) { return value == null ? 'n/a' : `${value.toFixed(1)} m`; }
+function formatElevationRange(min, max) { return min == null || max == null ? 'n/a' : `${min.toFixed(1)}–${max.toFixed(1)} m`; }
+function formatVolts(value) { return value == null ? 'n/a' : `${value.toFixed(2)} V`; }
+function formatAmps(value) { return value == null ? 'n/a' : `${value.toFixed(2)} A`; }
+function formatPercent(value) { return value == null ? 'n/a' : `${(value * 100).toFixed(0)}%`; }
 
 function clearMap() {
   document.getElementById('map-paths').replaceChildren();
@@ -237,10 +373,7 @@ function drawGrid() {
 
 function addLine(parent, x1, y1, x2, y2) {
   const line = document.createElementNS(NS, 'line');
-  line.setAttribute('x1', x1);
-  line.setAttribute('y1', y1);
-  line.setAttribute('x2', x2);
-  line.setAttribute('y2', y2);
+  line.setAttribute('x1', x1); line.setAttribute('y1', y1); line.setAttribute('x2', x2); line.setAttribute('y2', y2);
   parent.appendChild(line);
 }
 
@@ -252,13 +385,10 @@ function renderMap(doc) {
   const height = 520 - pad * 2;
   const lonSpan = Math.max(doc.bounds.max_lon - doc.bounds.min_lon, 1e-9);
   const latSpan = Math.max(doc.bounds.max_lat - doc.bounds.min_lat, 1e-9);
-  const project = ([lon, lat]) => [
-    pad + ((lon - doc.bounds.min_lon) / lonSpan) * width,
-    pad + (1 - (lat - doc.bounds.min_lat) / latSpan) * height
-  ];
+  const project = ([lon, lat]) => [pad + ((lon - doc.bounds.min_lon) / lonSpan) * width, pad + (1 - (lat - doc.bounds.min_lat) / latSpan) * height];
 
   const paths = document.getElementById('map-paths');
-  for (const path of doc.paths) {
+  for (const path of doc.paths || []) {
     if (!path.length) continue;
     const polyline = document.createElementNS(NS, 'polyline');
     polyline.setAttribute('class', 'track');
@@ -267,13 +397,10 @@ function renderMap(doc) {
   }
 
   const points = document.getElementById('map-points');
-  for (const point of doc.points) {
+  for (const point of doc.points || []) {
     const [cx, cy] = project(point);
     const circle = document.createElementNS(NS, 'circle');
-    circle.setAttribute('class', 'waypoint');
-    circle.setAttribute('cx', cx);
-    circle.setAttribute('cy', cy);
-    circle.setAttribute('r', 5);
+    circle.setAttribute('class', 'waypoint'); circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', 5);
     points.appendChild(circle);
   }
 }
