@@ -3,11 +3,13 @@ package health
 import "math"
 
 type GPSInput struct {
-	Samples             int
-	LowFixSamples       int
-	LowSatelliteSamples int
-	GapEvents           int
-	MaxGapSeconds       float64
+	Samples                 int
+	FixQualitySamples       int
+	SatelliteQualitySamples int
+	LowFixSamples           int
+	LowSatelliteSamples     int
+	GapEvents               int
+	MaxGapSeconds           float64
 }
 
 type BatteryInput struct {
@@ -77,12 +79,20 @@ func evaluateGPS(in GPSInput) Component {
 		return c
 	}
 	if in.LowFixSamples > 0 {
-		ratio := float64(in.LowFixSamples) / float64(in.Samples)
+		denominator := in.FixQualitySamples
+		if denominator == 0 {
+			denominator = in.Samples
+		}
+		ratio := float64(in.LowFixSamples) / float64(denominator)
 		c.Score -= penaltyByRatio(ratio, 10, 25, 45)
 		c.Findings = append(c.Findings, "GPS includes samples below 3D fix")
 	}
 	if in.LowSatelliteSamples > 0 {
-		ratio := float64(in.LowSatelliteSamples) / float64(in.Samples)
+		denominator := in.SatelliteQualitySamples
+		if denominator == 0 {
+			denominator = in.Samples
+		}
+		ratio := float64(in.LowSatelliteSamples) / float64(denominator)
 		c.Score -= penaltyByRatio(ratio, 5, 15, 30)
 		c.Findings = append(c.Findings, "GPS includes samples with fewer than 6 satellites")
 	}
