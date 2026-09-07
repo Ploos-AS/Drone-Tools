@@ -25,15 +25,23 @@ type Bounds struct {
 }
 
 type Summary struct {
-	TrackPoints     int        `json:"track_points"`
-	Waypoints       int        `json:"waypoints"`
-	DistanceMeters  float64    `json:"distance_meters"`
-	Bounds          Bounds     `json:"bounds"`
-	MinElevation    *float64   `json:"min_elevation_m,omitempty"`
-	MaxElevation    *float64   `json:"max_elevation_m,omitempty"`
-	StartTime       *time.Time `json:"start_time,omitempty"`
-	EndTime         *time.Time `json:"end_time,omitempty"`
-	DurationSeconds *float64   `json:"duration_seconds,omitempty"`
+	TrackPoints          int        `json:"track_points"`
+	Waypoints            int        `json:"waypoints"`
+	DistanceMeters       float64    `json:"distance_meters"`
+	Bounds               Bounds     `json:"bounds"`
+	MinElevation         *float64   `json:"min_elevation_m,omitempty"`
+	MaxElevation         *float64   `json:"max_elevation_m,omitempty"`
+	ElevationGainMeters  float64    `json:"elevation_gain_m"`
+	ElevationLossMeters  float64    `json:"elevation_loss_m"`
+	StartTime            *time.Time `json:"start_time,omitempty"`
+	EndTime              *time.Time `json:"end_time,omitempty"`
+	DurationSeconds      *float64   `json:"duration_seconds,omitempty"`
+	AverageSpeedMPS      *float64   `json:"average_speed_mps,omitempty"`
+	MaxSegmentSpeedMPS   *float64   `json:"max_segment_speed_mps,omitempty"`
+	TimedPoints          int        `json:"timed_points"`
+	ElevationPoints      int        `json:"elevation_points"`
+	Quality              string     `json:"quality"`
+	Warnings             []string   `json:"warnings,omitempty"`
 }
 
 type xmlPoint struct {
@@ -70,9 +78,11 @@ func Parse(r io.Reader) (Summary, error) {
 		return Summary{}, ErrNoTrackPoints
 	}
 
-	s := Summary{TrackPoints: len(points), Waypoints: len(doc.Waypoints)}
+	s := Summary{TrackPoints: len(points), Waypoints: len(doc.Waypoints), Quality: "good"}
 	s.Bounds = Bounds{MinLat: points[0].Lat, MaxLat: points[0].Lat, MinLon: points[0].Lon, MaxLon: points[0].Lon}
 
+	var maxSpeed float64
+	var haveMaxSpeed bool
 	for i, p := range points {
 		if p.Lat < s.Bounds.MinLat {
 			s.Bounds.MinLat = p.Lat
@@ -87,6 +97,7 @@ func Parse(r io.Reader) (Summary, error) {
 			s.Bounds.MaxLon = p.Lon
 		}
 		if p.Ele != nil {
+			s.ElevationPoints++
 			if s.MinElevation == nil || *p.Ele < *s.MinElevation {
 				v := *p.Ele
 				s.MinElevation = &v
@@ -95,8 +106,17 @@ func Parse(r io.Reader) (Summary, error) {
 				v := *p.Ele
 				s.MaxElevation = &v
 			}
+			if i > 0 && points[i-1].Ele != nil {
+				delta := *p.Ele - *points[i-1].Ele
+				if delta > 0 {
+					s.ElevationGainMeters += delta
+				} else {
+					s.ElevationLossMeters += -delta
+				}
+			}
 		}
 		if p.Time != nil {
+			s.TimedPoints++
 			if s.StartTime == nil || p.Time.Before(*s.StartTime) {
 				v := *p.Time
 				s.StartTime = &v
@@ -107,12 +127,40 @@ func Parse(r io.Reader) (Summary, error) {
 			}
 		}
 		if i > 0 {
-			s.DistanceMeters += haversine(points[i-1], p)
+			distance := haversine(points[i-1], p)
+			s.DistanceMeters += distance
+			if points[i-1].Time != nil && p.Time != nil {
+				dt := p.Time.Sub(*points[i-1].Time).Seconds()
+				if dt > 0 {
+					speed := distance / dt
+					if !haveMaxSpeed || speed > maxSpeed {
+						maxSpeed = speed
+						haveMaxSpeed = true
+					}
+				}
+			}
 		}
 	}
 	if s.StartTime != nil && s.EndTime != nil {
 		d := s.EndTime.Sub(*s.StartTime).Seconds()
 		s.DurationSeconds = &d
+		if d > 0 {
+			avg := s.DistanceMeters / d
+			s.AverageSpeedMPS = &avg
+		}
+	}
+	if haveMaxSpeed {
+		s.MaxSegmentSpeedMPS = &maxSpeed
+	}
+
+	if s.TimedPoints < 2 {
+		s.Warnings = append(s.Warnings, "insufficient timestamps for speed and duration analysis")
+	}
+	if s.ElevationPoints == 0 {
+		s.Warnings = append(s.Warnings, "no elevation samples")
+	}
+	if len(s.Warnings) > 0 {
+		s.Quality = "limited"
 	}
 	return s, nil
 }
