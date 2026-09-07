@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
 )
 
@@ -42,7 +43,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("Drone-Tools M1.0 listening on %s", addr)
+	log.Printf("Drone-Tools M1.1 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -64,12 +65,17 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.0",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.1",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
+	mux.HandleFunc("/api/v1/gpx/summary", gpxSummaryHandler)
 
 	return mux, nil
+}
+
+func uploadFile(w http.ResponseWriter, r *http.Request) (http.File, error) {
+	return nil, errors.New("not implemented")
 }
 
 func inspectHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +105,30 @@ func inspectHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+func gpxSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "expected multipart field named file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	summary, err := gpx.Parse(file)
+	if err != nil {
+		http.Error(w, "invalid GPX file", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
 }
 
 func envOrDefault(name, fallback string) string {
