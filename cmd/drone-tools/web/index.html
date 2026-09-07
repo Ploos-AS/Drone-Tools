@@ -7,7 +7,7 @@
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     body { margin: 0; background: #111827; color: #e5e7eb; }
-    main { max-width: 900px; margin: 0 auto; padding: 4rem 1.5rem; }
+    main { max-width: 1000px; margin: 0 auto; padding: 3rem 1.5rem; }
     h1 { font-size: 3rem; margin-bottom: .5rem; }
     .card { margin-top: 2rem; padding: 1.5rem; border: 1px solid #374151; border-radius: 1rem; background: #1f2937; }
     input, button { font: inherit; }
@@ -15,45 +15,144 @@
     button { padding: .65rem 1rem; border-radius: .6rem; border: 0; cursor: pointer; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #111827; padding: 1rem; border-radius: .6rem; }
     code { color: #a7f3d0; }
+    #map { width: 100%; height: 520px; background: #0b1220; border: 1px solid #374151; border-radius: .75rem; }
+    #map-grid line { stroke: #1f2937; stroke-width: 1; }
+    .track { fill: none; stroke: #a7f3d0; stroke-width: 3; vector-effect: non-scaling-stroke; }
+    .waypoint { fill: #fbbf24; stroke: #111827; stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .meta { color: #9ca3af; font-size: .95rem; }
   </style>
 </head>
 <body>
 <main>
   <h1>Drone-Tools</h1>
   <p>Privacy-first, self-hosted tools for drone hobbyists.</p>
+
+  <section class="card">
+    <h2>Flight Map</h2>
+    <p>Load GPX, KML or GeoJSON and render the track entirely locally. No map tiles, CDN or external service is contacted.</p>
+    <form id="map-form">
+      <input id="map-file" name="file" type="file" accept=".gpx,.kml,.geojson,.json" required>
+      <button type="submit">Show flight</button>
+    </form>
+    <p id="map-meta" class="meta">Select a supported geospatial file.</p>
+    <svg id="map" viewBox="0 0 900 520" role="img" aria-label="Flight track map">
+      <g id="map-grid"></g>
+      <g id="map-paths"></g>
+      <g id="map-points"></g>
+    </svg>
+  </section>
+
   <section class="card">
     <h2>File Inspector</h2>
-    <p>Inspect a flight-related file locally. M1.0 identifies supported formats, size, media type and SHA-256. Maximum size: 32 MiB.</p>
+    <p>Inspect a flight-related file locally. Maximum size: 32 MiB.</p>
     <form id="inspect-form">
       <input id="file" name="file" type="file" required>
       <button type="submit">Inspect file</button>
     </form>
     <pre id="result">Select a file to inspect.</pre>
   </section>
-  <section class="card">
-    <strong>M1.0 foundation</strong>
-    <p>Recognized: GPX, KML, KMZ, GeoJSON, PX4 ULog, MAVLink TLOG and ArduPilot BIN. Parsing comes in the next milestones.</p>
-  </section>
 </main>
 <script>
-const form = document.getElementById('inspect-form');
+const NS = 'http://www.w3.org/2000/svg';
 const result = document.getElementById('result');
-form.addEventListener('submit', async (event) => {
+
+document.getElementById('inspect-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const file = document.getElementById('file').files[0];
   if (!file) return;
   result.textContent = 'Inspecting…';
-  const body = new FormData();
-  body.append('file', file);
   try {
-    const response = await fetch('/api/v1/inspect', { method: 'POST', body });
-    const text = await response.text();
-    if (!response.ok) throw new Error(text.trim() || `HTTP ${response.status}`);
-    result.textContent = JSON.stringify(JSON.parse(text), null, 2);
+    const data = await postFile('/api/v1/inspect', file);
+    result.textContent = JSON.stringify(data, null, 2);
   } catch (error) {
     result.textContent = `Error: ${error.message}`;
   }
 });
+
+document.getElementById('map-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = document.getElementById('map-file').files[0];
+  if (!file) return;
+  const meta = document.getElementById('map-meta');
+  meta.textContent = 'Parsing flight…';
+  try {
+    const doc = await postFile('/api/v1/map', file);
+    renderMap(doc);
+    const vertices = doc.paths.reduce((n, path) => n + path.length, 0);
+    meta.textContent = `${doc.format.toUpperCase()} · ${doc.paths.length} path(s) · ${vertices} track vertices · ${doc.points.length} waypoint(s) · bounds ${formatBounds(doc.bounds)}`;
+  } catch (error) {
+    clearMap();
+    meta.textContent = `Error: ${error.message}`;
+  }
+});
+
+async function postFile(url, file) {
+  const body = new FormData();
+  body.append('file', file);
+  const response = await fetch(url, { method: 'POST', body });
+  const text = await response.text();
+  if (!response.ok) throw new Error(text.trim() || `HTTP ${response.status}`);
+  return JSON.parse(text);
+}
+
+function clearMap() {
+  document.getElementById('map-paths').replaceChildren();
+  document.getElementById('map-points').replaceChildren();
+  drawGrid();
+}
+
+function drawGrid() {
+  const grid = document.getElementById('map-grid');
+  grid.replaceChildren();
+  for (let x = 100; x < 900; x += 100) addLine(grid, x, 0, x, 520);
+  for (let y = 100; y < 520; y += 100) addLine(grid, 0, y, 900, y);
+}
+
+function addLine(parent, x1, y1, x2, y2) {
+  const line = document.createElementNS(NS, 'line');
+  line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+  line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+  parent.appendChild(line);
+}
+
+function renderMap(doc) {
+  clearMap();
+  if (!doc.bounds) return;
+  const pad = 35;
+  const width = 900 - pad * 2;
+  const height = 520 - pad * 2;
+  const lonSpan = Math.max(doc.bounds.max_lon - doc.bounds.min_lon, 1e-9);
+  const latSpan = Math.max(doc.bounds.max_lat - doc.bounds.min_lat, 1e-9);
+  const project = ([lon, lat]) => [
+    pad + ((lon - doc.bounds.min_lon) / lonSpan) * width,
+    pad + (1 - (lat - doc.bounds.min_lat) / latSpan) * height
+  ];
+
+  const paths = document.getElementById('map-paths');
+  for (const path of doc.paths) {
+    if (!path.length) continue;
+    const polyline = document.createElementNS(NS, 'polyline');
+    polyline.setAttribute('class', 'track');
+    polyline.setAttribute('points', path.map((p) => project(p).join(',')).join(' '));
+    paths.appendChild(polyline);
+  }
+
+  const points = document.getElementById('map-points');
+  for (const point of doc.points) {
+    const [cx, cy] = project(point);
+    const circle = document.createElementNS(NS, 'circle');
+    circle.setAttribute('class', 'waypoint');
+    circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', 5);
+    points.appendChild(circle);
+  }
+}
+
+function formatBounds(b) {
+  if (!b) return 'n/a';
+  return `${b.min_lat.toFixed(5)},${b.min_lon.toFixed(5)} → ${b.max_lat.toFixed(5)},${b.max_lon.toFixed(5)}`;
+}
+
+drawGrid();
 </script>
 </body>
 </html>
