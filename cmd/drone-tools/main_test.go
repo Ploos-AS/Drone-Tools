@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
 )
 
@@ -45,8 +46,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M1.0" {
-		t.Fatalf("stage = %v, want M1.0", response["stage"])
+	if response["stage"] != "M1.1" {
+		t.Fatalf("stage = %v, want M1.1", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -99,6 +100,36 @@ func TestInspectEndpoint(t *testing.T) {
 	}
 }
 
+func TestGPXSummaryEndpoint(t *testing.T) {
+	handler, err := newHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "flight.gpx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte(`<gpx version="1.1"><trk><trkseg><trkpt lat="58" lon="7"><ele>10</ele><time>2026-09-07T08:00:00Z</time></trkpt><trkpt lat="58.001" lon="7.002"><ele>20</ele><time>2026-09-07T08:01:00Z</time></trkpt></trkseg></trk></gpx>`))
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/gpx/summary", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summary gpx.Summary
+	if err := json.NewDecoder(rr.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.TrackPoints != 2 || summary.DistanceMeters <= 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
 func TestInspectEndpointMethod(t *testing.T) {
 	handler, err := newHandler(t.TempDir())
 	if err != nil {
@@ -115,6 +146,6 @@ func TestEnvOrDefault(t *testing.T) {
 	const name = "DRONE_TOOLS_TEST_VALUE"
 	t.Setenv(name, "configured")
 	if got := envOrDefault(name, "fallback"); got != "configured" {
-		t.Fatalf("envOrDefault() = %q", got)
+		t.Fatalf("envOrDefault() = %q, want configured", got)
 	}
 }
