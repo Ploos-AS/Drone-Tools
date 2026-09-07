@@ -37,12 +37,12 @@ type GPSSample struct {
 
 type LocalPositionSample struct {
 	TimestampUS uint64  `json:"timestamp_us,omitempty"`
-	X          float64 `json:"x_m,omitempty"`
-	Y          float64 `json:"y_m,omitempty"`
-	Z          float64 `json:"z_m,omitempty"`
-	VX         float64 `json:"vx_mps,omitempty"`
-	VY         float64 `json:"vy_mps,omitempty"`
-	VZ         float64 `json:"vz_mps,omitempty"`
+	X           float64 `json:"x_m,omitempty"`
+	Y           float64 `json:"y_m,omitempty"`
+	Z           float64 `json:"z_m,omitempty"`
+	VX          float64 `json:"vx_mps,omitempty"`
+	VY          float64 `json:"vy_mps,omitempty"`
+	VZ          float64 `json:"vz_mps,omitempty"`
 }
 
 type BatterySample struct {
@@ -59,15 +59,15 @@ type Telemetry struct {
 }
 
 type Summary struct {
-	Format          string           `json:"format"`
-	Version         uint8            `json:"version"`
-	StartTimestamp  uint64           `json:"start_timestamp_us"`
-	Messages        int              `json:"messages"`
-	MessageTypes    map[string]int   `json:"message_types"`
-	FormatNames     []string         `json:"format_names,omitempty"`
-	Subscriptions   []Subscription   `json:"subscriptions,omitempty"`
-	LoggedDataCount int              `json:"logged_data_messages"`
-	Telemetry       Telemetry        `json:"telemetry"`
+	Format          string         `json:"format"`
+	Version         uint8          `json:"version"`
+	StartTimestamp  uint64         `json:"start_timestamp_us"`
+	Messages        int            `json:"messages"`
+	MessageTypes    map[string]int `json:"message_types"`
+	FormatNames     []string       `json:"format_names,omitempty"`
+	Subscriptions   []Subscription `json:"subscriptions,omitempty"`
+	LoggedDataCount int            `json:"logged_data_messages"`
+	Telemetry       Telemetry      `json:"telemetry"`
 }
 
 type fieldDef struct {
