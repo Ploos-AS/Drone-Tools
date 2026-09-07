@@ -17,6 +17,7 @@ import (
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
 	"github.com/Ploos-AS/Drone-Tools/internal/mapdata"
+	"github.com/Ploos-AS/Drone-Tools/internal/ulog"
 )
 
 //go:embed web/*
@@ -40,13 +41,8 @@ func main() {
 		log.Fatalf("prepare HTTP handler: %v", err)
 	}
 
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	log.Printf("Drone-Tools M1.5 listening on %s", addr)
+	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	log.Printf("Drone-Tools M2.0 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -68,7 +64,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.5",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.0",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
@@ -77,7 +73,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 	mux.HandleFunc("/api/v1/kml/summary", geoSummaryHandler(geodata.ParseKML, "KML"))
 	mux.HandleFunc("/api/v1/geojson/summary", geoSummaryHandler(geodata.ParseGeoJSON, "GeoJSON"))
 	mux.HandleFunc("/api/v1/map", mapHandler)
-
+	mux.HandleFunc("/api/v1/ulog/inspect", ulogInspectHandler)
 	return mux, nil
 }
 
@@ -87,7 +83,6 @@ func inspectHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -95,7 +90,6 @@ func inspectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
 	result, err := inspector.Inspect(header.Filename, file)
 	if errors.Is(err, inspector.ErrTooLarge) {
 		http.Error(w, "file exceeds 32 MiB limit", http.StatusRequestEntityTooLarge)
@@ -105,7 +99,6 @@ func inspectHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unable to inspect file", http.StatusBadRequest)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
@@ -116,7 +109,6 @@ func gpxSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -124,7 +116,6 @@ func gpxSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
 	summary, err := gpx.Parse(file)
 	if err != nil {
 		http.Error(w, "invalid GPX file", http.StatusBadRequest)
@@ -141,7 +132,6 @@ func geoSummaryHandler(parse func(io.Reader) (geodata.Summary, error), format st
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
 		file, _, err := r.FormFile("file")
 		if err != nil {
@@ -149,7 +139,6 @@ func geoSummaryHandler(parse func(io.Reader) (geodata.Summary, error), format st
 			return
 		}
 		defer file.Close()
-
 		summary, err := parse(file)
 		if err != nil {
 			http.Error(w, "invalid "+format+" file", http.StatusBadRequest)
@@ -166,7 +155,6 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -174,7 +162,6 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
 	doc, err := mapdata.Parse(header.Filename, file)
 	if err != nil {
 		http.Error(w, "unsupported or invalid map file", http.StatusBadRequest)
@@ -182,6 +169,28 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(doc)
+}
+
+func ulogInspectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "expected multipart field named file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	summary, err := ulog.Inspect(file)
+	if err != nil {
+		http.Error(w, "invalid PX4 ULog file", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
 }
 
 func envOrDefault(name, fallback string) string {
