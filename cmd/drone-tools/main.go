@@ -16,6 +16,7 @@ import (
 	geodata "github.com/Ploos-AS/Drone-Tools/internal/geo"
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
+	"github.com/Ploos-AS/Drone-Tools/internal/mapdata"
 )
 
 //go:embed web/*
@@ -45,7 +46,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("Drone-Tools M1.2 listening on %s", addr)
+	log.Printf("Drone-Tools M1.3 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -67,13 +68,14 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.2",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.3",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
 	mux.HandleFunc("/api/v1/gpx/summary", gpxSummaryHandler)
 	mux.HandleFunc("/api/v1/kml/summary", geoSummaryHandler(geodata.ParseKML, "KML"))
 	mux.HandleFunc("/api/v1/geojson/summary", geoSummaryHandler(geodata.ParseGeoJSON, "GeoJSON"))
+	mux.HandleFunc("/api/v1/map", mapHandler)
 
 	return mux, nil
 }
@@ -155,6 +157,30 @@ func geoSummaryHandler(parse func(io.Reader) (geodata.Summary, error), format st
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(summary)
 	}
+}
+
+func mapHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "expected multipart field named file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	doc, err := mapdata.Parse(header.Filename, file)
+	if err != nil {
+		http.Error(w, "unsupported or invalid map file", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(doc)
 }
 
 func envOrDefault(name, fallback string) string {
