@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Ploos-AS/Drone-Tools/internal/dataflash"
 	geodata "github.com/Ploos-AS/Drone-Tools/internal/geo"
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
@@ -62,7 +63,7 @@ func main() {
 	}
 
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	log.Printf("Drone-Tools M2.2 listening on %s", addr)
+	log.Printf("Drone-Tools M2.4 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -84,7 +85,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.2",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.4",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
@@ -95,6 +96,8 @@ func newHandler(dataDir string) (http.Handler, error) {
 	mux.HandleFunc("/api/v1/map", mapHandler)
 	mux.HandleFunc("/api/v1/ulog/inspect", ulogInspectHandler)
 	mux.HandleFunc("/api/v1/ulog/telemetry", ulogInspectHandler)
+	mux.HandleFunc("/api/v1/dataflash/inspect", dataflashInspectHandler)
+	mux.HandleFunc("/api/v1/dataflash/telemetry", dataflashInspectHandler)
 	return mux, nil
 }
 
@@ -161,13 +164,22 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	w.Header().Set("Content-Type", "application/json")
-	if filepath.Ext(header.Filename) == ".ulg" {
+	switch filepath.Ext(header.Filename) {
+	case ".ulg":
 		summary, err := ulog.Inspect(file)
 		if err != nil {
 			http.Error(w, "invalid PX4 ULog file", http.StatusBadRequest)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(analyzeULog(summary.Telemetry))
+		return
+	case ".bin":
+		summary, err := dataflash.Inspect(file)
+		if err != nil {
+			http.Error(w, "invalid ArduPilot DataFlash log", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(analyzeDataFlash(summary.Telemetry))
 		return
 	}
 
@@ -218,7 +230,8 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	var doc mapdata.Document
-	if filepath.Ext(header.Filename) == ".ulg" {
+	switch filepath.Ext(header.Filename) {
+	case ".ulg":
 		summary, err := ulog.Inspect(file)
 		if err != nil {
 			http.Error(w, "invalid PX4 ULog file", http.StatusBadRequest)
@@ -229,7 +242,18 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	} else {
+	case ".bin":
+		summary, err := dataflash.Inspect(file)
+		if err != nil {
+			http.Error(w, "invalid ArduPilot DataFlash log", http.StatusBadRequest)
+			return
+		}
+		doc, err = dataflashMap(summary.Telemetry.GPS)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
 		doc, err = mapdata.Parse(header.Filename, file)
 		if err != nil {
 			http.Error(w, "unsupported or invalid map file", http.StatusBadRequest)
@@ -262,6 +286,28 @@ func ulogInspectHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(summary)
 }
 
+func dataflashInspectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, inspector.MaxUploadBytes+(1<<20))
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "expected multipart field named file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	summary, err := dataflash.Inspect(file)
+	if err != nil {
+		http.Error(w, "invalid ArduPilot DataFlash log", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
+}
+
 func ulogMap(samples []ulog.GPSSample) (mapdata.Document, error) {
 	if len(samples) == 0 {
 		return mapdata.Document{}, errors.New("ULog contains no GPS samples")
@@ -273,8 +319,26 @@ func ulogMap(samples []ulog.GPSSample) (mapdata.Document, error) {
 		}
 		path = append(path, mapdata.Coordinate{sample.Longitude, sample.Latitude})
 	}
+	return finishTelemetryMap("px4-ulog", path, "ULog contains no valid GPS coordinates")
+}
+
+func dataflashMap(samples []dataflash.GPSSample) (mapdata.Document, error) {
+	if len(samples) == 0 {
+		return mapdata.Document{}, errors.New("DataFlash log contains no GPS samples")
+	}
+	path := make([]mapdata.Coordinate, 0, len(samples))
+	for _, sample := range samples {
+		if sample.Latitude < -90 || sample.Latitude > 90 || sample.Longitude < -180 || sample.Longitude > 180 {
+			continue
+		}
+		path = append(path, mapdata.Coordinate{sample.Longitude, sample.Latitude})
+	}
+	return finishTelemetryMap("ardupilot-dataflash", path, "DataFlash log contains no valid GPS coordinates")
+}
+
+func finishTelemetryMap(format string, path []mapdata.Coordinate, emptyMessage string) (mapdata.Document, error) {
 	if len(path) == 0 {
-		return mapdata.Document{}, errors.New("ULog contains no valid GPS coordinates")
+		return mapdata.Document{}, errors.New(emptyMessage)
 	}
 	bounds := mapdata.Bounds{MinLon: path[0][0], MaxLon: path[0][0], MinLat: path[0][1], MaxLat: path[0][1]}
 	for _, point := range path[1:] {
@@ -283,7 +347,7 @@ func ulogMap(samples []ulog.GPSSample) (mapdata.Document, error) {
 		bounds.MinLat = math.Min(bounds.MinLat, point[1])
 		bounds.MaxLat = math.Max(bounds.MaxLat, point[1])
 	}
-	return mapdata.Document{Format: "px4-ulog", Paths: [][]mapdata.Coordinate{path}, Bounds: &bounds}, nil
+	return mapdata.Document{Format: format, Paths: [][]mapdata.Coordinate{path}, Bounds: &bounds}, nil
 }
 
 func analyzeULog(telemetry ulog.Telemetry) flightAnalysis {
@@ -311,7 +375,7 @@ func analyzeULog(telemetry ulog.Telemetry) flightAnalysis {
 			continue
 		}
 		previous := telemetry.GPS[i-1]
-		a.DistanceMeters += gpsDistance(previous, sample)
+		a.DistanceMeters += haversine(previous.Latitude, previous.Longitude, sample.Latitude, sample.Longitude)
 		delta := sample.AltitudeMeters - previous.AltitudeMeters
 		if delta > 0 {
 			a.ElevationGainMeters += delta
@@ -327,14 +391,7 @@ func analyzeULog(telemetry ulog.Telemetry) flightAnalysis {
 
 	first := telemetry.GPS[0].TimestampUS
 	last := telemetry.GPS[len(telemetry.GPS)-1].TimestampUS
-	if last > first {
-		duration := float64(last-first) / 1e6
-		a.DurationSeconds = &duration
-		average := a.DistanceMeters / duration
-		a.AverageSpeedMPS = &average
-	} else {
-		a.Warnings = append(a.Warnings, "GPS timestamps do not provide a positive flight duration")
-	}
+	setTimedAnalysis(&a, first, last)
 
 	for _, sample := range telemetry.GPS {
 		if sample.FixType > 0 && sample.FixType < 3 {
@@ -360,12 +417,87 @@ func analyzeULog(telemetry ulog.Telemetry) flightAnalysis {
 	return a
 }
 
-func gpsDistance(a, b ulog.GPSSample) float64 {
+func analyzeDataFlash(telemetry dataflash.Telemetry) flightAnalysis {
+	a := flightAnalysis{Quality: "good", TrackPoints: len(telemetry.GPS), TimedPoints: len(telemetry.GPS), ElevationPoints: len(telemetry.GPS)}
+	if len(telemetry.GPS) == 0 {
+		a.Quality = "limited"
+		a.Warnings = append(a.Warnings, "no GPS/GPS2 samples")
+		return a
+	}
+
+	minElevation := telemetry.GPS[0].AltitudeMeters
+	maxElevation := minElevation
+	var maxSpeed float64
+	for i, sample := range telemetry.GPS {
+		minElevation = math.Min(minElevation, sample.AltitudeMeters)
+		maxElevation = math.Max(maxElevation, sample.AltitudeMeters)
+		maxSpeed = math.Max(maxSpeed, sample.SpeedMPS)
+		if sample.Status > 0 && sample.Status < 3 {
+			a.Quality = "limited"
+		}
+		if sample.Satellites > 0 && sample.Satellites < 6 {
+			a.Quality = "limited"
+		}
+		if i == 0 {
+			continue
+		}
+		previous := telemetry.GPS[i-1]
+		a.DistanceMeters += haversine(previous.Latitude, previous.Longitude, sample.Latitude, sample.Longitude)
+		delta := sample.AltitudeMeters - previous.AltitudeMeters
+		if delta > 0 {
+			a.ElevationGainMeters += delta
+		} else {
+			a.ElevationLossMeters -= delta
+		}
+	}
+	a.MinElevation = &minElevation
+	a.MaxElevation = &maxElevation
+	if maxSpeed > 0 {
+		a.MaxSegmentSpeedMPS = &maxSpeed
+	}
+	setTimedAnalysis(&a, telemetry.GPS[0].TimestampUS, telemetry.GPS[len(telemetry.GPS)-1].TimestampUS)
+
+	for _, sample := range telemetry.GPS {
+		if sample.Status > 0 && sample.Status < 3 {
+			a.Warnings = append(a.Warnings, "GPS samples include status below 3D fix")
+			break
+		}
+	}
+	for _, sample := range telemetry.GPS {
+		if sample.Satellites > 0 && sample.Satellites < 6 {
+			a.Warnings = append(a.Warnings, "GPS samples include fewer than 6 satellites")
+			break
+		}
+	}
+
+	if len(telemetry.Battery) > 0 {
+		latest := telemetry.Battery[len(telemetry.Battery)-1]
+		a.BatteryVoltageV = pointer(latest.VoltageV)
+		a.BatteryCurrentA = pointer(latest.CurrentA)
+		a.BatteryRemaining = pointer(latest.Remaining)
+	} else {
+		a.Warnings = append(a.Warnings, "no BAT/BAT2 samples")
+	}
+	return a
+}
+
+func setTimedAnalysis(a *flightAnalysis, first, last uint64) {
+	if last > first {
+		duration := float64(last-first) / 1e6
+		a.DurationSeconds = &duration
+		average := a.DistanceMeters / duration
+		a.AverageSpeedMPS = &average
+	} else {
+		a.Warnings = append(a.Warnings, "GPS timestamps do not provide a positive flight duration")
+	}
+}
+
+func haversine(latA, lonA, latB, lonB float64) float64 {
 	const earthRadius = 6371000.0
-	lat1 := a.Latitude * math.Pi / 180
-	lat2 := b.Latitude * math.Pi / 180
-	dLat := (b.Latitude - a.Latitude) * math.Pi / 180
-	dLon := (b.Longitude - a.Longitude) * math.Pi / 180
+	lat1 := latA * math.Pi / 180
+	lat2 := latB * math.Pi / 180
+	dLat := (latB - latA) * math.Pi / 180
+	dLon := (lonB - lonA) * math.Pi / 180
 	h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(lat1)*math.Cos(lat2)*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return earthRadius * 2 * math.Atan2(math.Sqrt(h), math.Sqrt(1-h))
 }
