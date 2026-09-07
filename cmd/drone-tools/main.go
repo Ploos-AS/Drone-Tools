@@ -74,10 +74,6 @@ func newHandler(dataDir string) (http.Handler, error) {
 	return mux, nil
 }
 
-func uploadFile(w http.ResponseWriter, r *http.Request) (http.File, error) {
-	return nil, errors.New("not implemented")
-}
-
 func inspectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
