@@ -63,7 +63,7 @@ func main() {
 	}
 
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	log.Printf("Drone-Tools M2.8 listening on %s", addr)
+	log.Printf("Drone-Tools M3.1 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -85,12 +85,13 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.8",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M3.1",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
 	mux.HandleFunc("/api/v1/gpx/summary", gpxSummaryHandler)
 	mux.HandleFunc("/api/v1/analyze", analyzeHandler)
+	mux.HandleFunc("/api/v1/health", flightHealthHandler)
 	mux.HandleFunc("/api/v1/kml/summary", geoSummaryHandler(geodata.ParseKML, "KML"))
 	mux.HandleFunc("/api/v1/geojson/summary", geoSummaryHandler(geodata.ParseGeoJSON, "GeoJSON"))
 	mux.HandleFunc("/api/v1/map", mapHandler)
