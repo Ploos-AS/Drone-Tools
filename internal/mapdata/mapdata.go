@@ -251,10 +251,18 @@ func finish(d Document) (Document, error) {
 	}
 	b := Bounds{MinLon: all[0][0], MaxLon: all[0][0], MinLat: all[0][1], MaxLat: all[0][1]}
 	for _, c := range all[1:] {
-		if c[0] < b.MinLon { b.MinLon = c[0] }
-		if c[0] > b.MaxLon { b.MaxLon = c[0] }
-		if c[1] < b.MinLat { b.MinLat = c[1] }
-		if c[1] > b.MaxLat { b.MaxLat = c[1] }
+		if c[0] < b.MinLon {
+			b.MinLon = c[0]
+		}
+		if c[0] > b.MaxLon {
+			b.MaxLon = c[0]
+		}
+		if c[1] < b.MinLat {
+			b.MinLat = c[1]
+		}
+		if c[1] > b.MaxLat {
+			b.MaxLat = c[1]
+		}
 	}
 	d.Bounds = &b
 	return d, nil
