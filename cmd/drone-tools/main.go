@@ -63,7 +63,7 @@ func main() {
 	}
 
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	log.Printf("Drone-Tools M2.4 listening on %s", addr)
+	log.Printf("Drone-Tools M2.8 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -85,7 +85,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.4",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.8",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
@@ -98,6 +98,8 @@ func newHandler(dataDir string) (http.Handler, error) {
 	mux.HandleFunc("/api/v1/ulog/telemetry", ulogInspectHandler)
 	mux.HandleFunc("/api/v1/dataflash/inspect", dataflashInspectHandler)
 	mux.HandleFunc("/api/v1/dataflash/telemetry", dataflashInspectHandler)
+	mux.HandleFunc("/api/v1/tlog/inspect", tlogInspectHandler)
+	mux.HandleFunc("/api/v1/tlog/telemetry", tlogInspectHandler)
 	return mux, nil
 }
 
@@ -181,6 +183,14 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(analyzeDataFlash(summary.Telemetry))
 		return
+	case ".tlog":
+		analysis, err := parseTLOGAnalysis(file)
+		if err != nil {
+			http.Error(w, "invalid MAVLink TLOG file", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(analysis)
+		return
 	}
 
 	summary, err := gpx.Parse(file)
@@ -251,6 +261,12 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 		doc, err = dataflashMap(summary.Telemetry.GPS)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case ".tlog":
+		doc, err = parseTLOGMap(file)
+		if err != nil {
+			http.Error(w, "invalid MAVLink TLOG file", http.StatusBadRequest)
 			return
 		}
 	default:
