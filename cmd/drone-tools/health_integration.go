@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"sort"
 
 	"github.com/Ploos-AS/Drone-Tools/internal/dataflash"
 	"github.com/Ploos-AS/Drone-Tools/internal/health"
@@ -60,53 +61,109 @@ func flightHealthHandler(w http.ResponseWriter, r *http.Request) {
 
 func healthInputFromULog(telemetry ulog.Telemetry) health.Input {
 	in := health.Input{}
+	timestamps := make([]uint64, 0, len(telemetry.GPS))
 	for i, sample := range telemetry.GPS {
 		in.GPS.Samples++
+		in.GPS.FixQualitySamples++
+		in.GPS.SatelliteQualitySamples++
 		in.Data.TrackSamples++
-		if sample.FixType > 0 && sample.FixType < 3 {
+		if sample.FixType < 3 {
 			in.GPS.LowFixSamples++
 		}
-		if sample.SatellitesUsed > 0 && sample.SatellitesUsed < 6 {
+		if sample.SatellitesUsed < 6 {
 			in.GPS.LowSatelliteSamples++
 		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousULogTimestamp(telemetry.GPS, i))
+		if sample.TimestampUS > 0 {
+			timestamps = append(timestamps, sample.TimestampUS)
+		}
 	}
+	accumulateGPSGaps(&in.GPS, timestamps)
 	accumulateULogBattery(&in.Battery, telemetry.Battery)
 	return in
 }
 
 func healthInputFromDataFlash(telemetry dataflash.Telemetry) health.Input {
 	in := health.Input{}
+	timestamps := make([]uint64, 0, len(telemetry.GPS))
 	for i, sample := range telemetry.GPS {
 		in.GPS.Samples++
+		in.GPS.FixQualitySamples++
+		in.GPS.SatelliteQualitySamples++
 		in.Data.TrackSamples++
-		if sample.Status > 0 && sample.Status < 3 {
+		if sample.Status < 3 {
 			in.GPS.LowFixSamples++
 		}
-		if sample.Satellites > 0 && sample.Satellites < 6 {
+		if sample.Satellites < 6 {
 			in.GPS.LowSatelliteSamples++
 		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousDataFlashTimestamp(telemetry.GPS, i))
+		if sample.TimestampUS > 0 {
+			timestamps = append(timestamps, sample.TimestampUS)
+		}
 	}
+	accumulateGPSGaps(&in.GPS, timestamps)
 	accumulateDataFlashBattery(&in.Battery, telemetry.Battery)
 	return in
 }
 
 func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 	in := health.Input{}
+	timestamps := make([]uint64, 0, len(telemetry.GPS))
 	for i, sample := range telemetry.GPS {
 		in.GPS.Samples++
 		in.Data.TrackSamples++
-		if sample.FixType > 0 && sample.FixType < 3 {
-			in.GPS.LowFixSamples++
-		}
-		if sample.Satellites > 0 && sample.Satellites < 6 {
-			in.GPS.LowSatelliteSamples++
+		if sample.Source == "GPS_RAW_INT" {
+			in.GPS.FixQualitySamples++
+			in.GPS.SatelliteQualitySamples++
+			if sample.FixType < 3 {
+				in.GPS.LowFixSamples++
+			}
+			if sample.Satellites < 6 {
+				in.GPS.LowSatelliteSamples++
+			}
 		}
 		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousTLOGTimestamp(telemetry.GPS, i))
+		if sample.TimestampUS > 0 {
+			timestamps = append(timestamps, sample.TimestampUS)
+		}
 	}
+	accumulateGPSGaps(&in.GPS, timestamps)
 	accumulateTLOGBattery(&in.Battery, telemetry.Battery)
 	return in
+}
+
+func accumulateGPSGaps(gps *health.GPSInput, timestamps []uint64) {
+	if len(timestamps) < 3 {
+		return
+	}
+	deltas := make([]uint64, 0, len(timestamps)-1)
+	for i := 1; i < len(timestamps); i++ {
+		if timestamps[i] > timestamps[i-1] {
+			deltas = append(deltas, timestamps[i]-timestamps[i-1])
+		}
+	}
+	if len(deltas) < 2 {
+		return
+	}
+	baselineValues := append([]uint64(nil), deltas...)
+	sort.Slice(baselineValues, func(i, j int) bool { return baselineValues[i] < baselineValues[j] })
+	baseline := baselineValues[len(baselineValues)/2]
+	threshold := baseline * 5
+	const minimumGapUS = uint64(5_000_000)
+	if threshold < minimumGapUS {
+		threshold = minimumGapUS
+	}
+	for _, delta := range deltas {
+		if delta <= threshold {
+			continue
+		}
+		gps.GapEvents++
+		seconds := float64(delta) / 1e6
+		if seconds > gps.MaxGapSeconds {
+			gps.MaxGapSeconds = seconds
+		}
+	}
 }
 
 func accumulateTrackQuality(data *health.DataInput, timestamp uint64, lat, lon float64, previous uint64) {
