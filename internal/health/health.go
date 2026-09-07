@@ -96,7 +96,7 @@ func evaluateGPS(in GPSInput) Component {
 		}
 		ratio := float64(in.LowSatelliteSamples) / float64(denominator)
 		c.Score -= penaltyByRatio(ratio, 5, 15, 30)
-		c.Findings = append(c.Findings, "GPS includes samples with poor reported precision")
+		c.Findings = append(c.Findings, "GPS includes samples with fewer than 6 satellites")
 	}
 	if in.PoorPrecisionSamples > 0 {
 		denominator := in.PrecisionQualitySamples
