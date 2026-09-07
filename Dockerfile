@@ -13,6 +13,7 @@ RUN addgroup -S -g 10001 drone-tools && \
     adduser -S -D -H -u 10001 -G drone-tools drone-tools && \
     mkdir -p /data && chown drone-tools:drone-tools /data
 COPY --from=build /out/drone-tools /usr/local/bin/drone-tools
+COPY --chmod=755 scripts/healthcheck.sh /usr/local/bin/drone-tools-healthcheck
 USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8080
