@@ -32,7 +32,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build OCI image
+      - name: Build runtime smoke image
+        run: docker build -t drone-tools:ci .
+      - name: Verify configured runtime user
+        run: test "$(docker image inspect drone-tools:ci --format '{{.Config.User}}')" = "10001:10001"
+      - name: Run container smoke test
+        run: |
+          docker run -d --name drone-tools-ci \
+            --read-only \
+            --tmpfs /tmp \
+            -p 127.0.0.1:18080:8080 \
+            drone-tools:ci
+          trap 'docker logs drone-tools-ci; docker rm -f drone-tools-ci' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:18080/healthz | grep -q '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Build multi-architecture OCI image
         uses: docker/build-push-action@v6
         with:
           context: .
