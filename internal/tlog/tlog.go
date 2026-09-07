@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 )
 
@@ -12,6 +13,11 @@ const (
 	mavlinkV1Magic = 0xFE
 	mavlinkV2Magic = 0xFD
 	signedFlag     = 0x01
+
+	msgSysStatus         = 1
+	msgGPSRawInt         = 24
+	msgGlobalPositionInt = 33
+	msgBatteryStatus     = 147
 )
 
 var (
@@ -24,6 +30,30 @@ type Endpoint struct {
 	ComponentID uint8 `json:"component_id"`
 }
 
+type GPSSample struct {
+	Source         string  `json:"source"`
+	TimestampUS    uint64  `json:"timestamp_us,omitempty"`
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	AltitudeMeters float64 `json:"altitude_m,omitempty"`
+	SpeedMPS       float64 `json:"speed_mps,omitempty"`
+	FixType        uint8   `json:"fix_type,omitempty"`
+	Satellites     uint8   `json:"satellites,omitempty"`
+}
+
+type BatterySample struct {
+	Source      string  `json:"source"`
+	TimestampUS uint64  `json:"timestamp_us,omitempty"`
+	VoltageV    float64 `json:"voltage_v,omitempty"`
+	CurrentA    float64 `json:"current_a,omitempty"`
+	Remaining   float64 `json:"remaining,omitempty"`
+}
+
+type Telemetry struct {
+	GPS     []GPSSample     `json:"gps,omitempty"`
+	Battery []BatterySample `json:"battery,omitempty"`
+}
+
 type Summary struct {
 	Format           string         `json:"format"`
 	Records          int            `json:"records"`
@@ -34,6 +64,7 @@ type Summary struct {
 	EndTimestampUS   uint64         `json:"end_timestamp_us,omitempty"`
 	MessageIDs       map[uint32]int `json:"message_ids"`
 	Endpoints        []Endpoint     `json:"endpoints,omitempty"`
+	Telemetry        Telemetry      `json:"telemetry"`
 }
 
 func Inspect(r io.Reader) (Summary, error) {
@@ -62,6 +93,7 @@ func Inspect(r io.Reader) (Summary, error) {
 		if frameLength > len(data)-offset {
 			return Summary{}, ErrTruncated
 		}
+		frame := data[offset : offset+frameLength]
 
 		s.Records++
 		if s.Records == 1 {
@@ -79,6 +111,7 @@ func Inspect(r io.Reader) (Summary, error) {
 		s.MessageIDs[msgID]++
 		key := uint16(sysID)<<8 | uint16(compID)
 		endpoints[key] = Endpoint{SystemID: sysID, ComponentID: compID}
+		decodeCoreTelemetry(&s.Telemetry, msgID, timestamp, framePayload(frame, version))
 		offset += frameLength
 	}
 
@@ -95,6 +128,127 @@ func Inspect(r io.Reader) (Summary, error) {
 		return s.Endpoints[i].SystemID < s.Endpoints[j].SystemID
 	})
 	return s, nil
+}
+
+func framePayload(frame []byte, version int) []byte {
+	if len(frame) < 2 {
+		return nil
+	}
+	payloadLength := int(frame[1])
+	start := 6
+	if version == 2 {
+		start = 10
+	}
+	if start+payloadLength > len(frame) {
+		return nil
+	}
+	return frame[start : start+payloadLength]
+}
+
+func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64, payload []byte) {
+	switch msgID {
+	case msgGPSRawInt:
+		if len(payload) < 30 {
+			return
+		}
+		timestamp := binary.LittleEndian.Uint64(payload[0:8])
+		if timestamp == 0 {
+			timestamp = recordTimestampUS
+		}
+		lat := float64(int32(binary.LittleEndian.Uint32(payload[9:13]))) / 1e7
+		lon := float64(int32(binary.LittleEndian.Uint32(payload[13:17]))) / 1e7
+		if !validCoordinate(lat, lon) {
+			return
+		}
+		out.GPS = append(out.GPS, GPSSample{
+			Source:         "GPS_RAW_INT",
+			TimestampUS:    timestamp,
+			Latitude:       lat,
+			Longitude:      lon,
+			AltitudeMeters: float64(int32(binary.LittleEndian.Uint32(payload[17:21]))) / 1000,
+			SpeedMPS:       float64(binary.LittleEndian.Uint16(payload[25:27])) / 100,
+			FixType:        payload[8],
+			Satellites:     payload[29],
+		})
+	case msgGlobalPositionInt:
+		if len(payload) < 28 {
+			return
+		}
+		lat := float64(int32(binary.LittleEndian.Uint32(payload[4:8]))) / 1e7
+		lon := float64(int32(binary.LittleEndian.Uint32(payload[8:12]))) / 1e7
+		if !validCoordinate(lat, lon) {
+			return
+		}
+		vx := float64(int16(binary.LittleEndian.Uint16(payload[20:22]))) / 100
+		vy := float64(int16(binary.LittleEndian.Uint16(payload[22:24]))) / 100
+		out.GPS = append(out.GPS, GPSSample{
+			Source:         "GLOBAL_POSITION_INT",
+			TimestampUS:    recordTimestampUS,
+			Latitude:       lat,
+			Longitude:      lon,
+			AltitudeMeters: float64(int32(binary.LittleEndian.Uint32(payload[12:16]))) / 1000,
+			SpeedMPS:       math.Hypot(vx, vy),
+		})
+	case msgSysStatus:
+		if len(payload) < 19 {
+			return
+		}
+		voltageMV := binary.LittleEndian.Uint16(payload[14:16])
+		currentCA := int16(binary.LittleEndian.Uint16(payload[16:18]))
+		remainingPct := int8(payload[18])
+		sample := BatterySample{Source: "SYS_STATUS", TimestampUS: recordTimestampUS}
+		var have bool
+		if voltageMV != 0xffff {
+			sample.VoltageV = float64(voltageMV) / 1000
+			have = true
+		}
+		if currentCA >= 0 {
+			sample.CurrentA = float64(currentCA) / 100
+			have = true
+		}
+		if remainingPct >= 0 {
+			sample.Remaining = float64(remainingPct) / 100
+			have = true
+		}
+		if have {
+			out.Battery = append(out.Battery, sample)
+		}
+	case msgBatteryStatus:
+		if len(payload) < 36 {
+			return
+		}
+		sample := BatterySample{Source: "BATTERY_STATUS", TimestampUS: recordTimestampUS}
+		var voltageMV uint64
+		for i := 0; i < 10; i++ {
+			cell := binary.LittleEndian.Uint16(payload[10+i*2 : 12+i*2])
+			if cell == 0xffff {
+				continue
+			}
+			voltageMV += uint64(cell)
+		}
+		var have bool
+		if voltageMV > 0 {
+			sample.VoltageV = float64(voltageMV) / 1000
+			have = true
+		}
+		currentCA := int16(binary.LittleEndian.Uint16(payload[30:32]))
+		if currentCA >= 0 {
+			sample.CurrentA = float64(currentCA) / 100
+			have = true
+		}
+		remainingPct := int8(payload[35])
+		if remainingPct >= 0 {
+			sample.Remaining = float64(remainingPct) / 100
+			have = true
+		}
+		if have {
+			out.Battery = append(out.Battery, sample)
+		}
+	}
+}
+
+func validCoordinate(lat, lon float64) bool {
+	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
 }
 
 func frameInfo(data []byte) (length int, msgID uint32, sysID, compID uint8, signed bool, version int, err error) {
