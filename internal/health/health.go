@@ -3,17 +3,17 @@ package health
 import "math"
 
 type GPSInput struct {
-	Samples          int
-	LowFixSamples    int
+	Samples             int
+	LowFixSamples       int
 	LowSatelliteSamples int
 }
 
 type BatteryInput struct {
-	Samples          int
-	StartRemaining   *float64
-	EndRemaining     *float64
-	MinVoltageV      *float64
-	MaxCurrentA      *float64
+	Samples        int
+	StartRemaining *float64
+	EndRemaining   *float64
+	MinVoltageV    *float64
+	MaxCurrentA    *float64
 }
 
 type DataInput struct {
@@ -36,13 +36,13 @@ type Component struct {
 }
 
 type Result struct {
-	Score      int       `json:"score"`
-	Status     string    `json:"status"`
-	GPS        Component `json:"gps"`
-	Battery    Component `json:"battery"`
-	Data       Component `json:"data_quality"`
-	Findings   []string  `json:"findings,omitempty"`
-	Algorithm  string    `json:"algorithm"`
+	Score     int       `json:"score"`
+	Status    string    `json:"status"`
+	GPS       Component `json:"gps"`
+	Battery   Component `json:"battery"`
+	Data      Component `json:"data_quality"`
+	Findings  []string  `json:"findings,omitempty"`
+	Algorithm string    `json:"algorithm"`
 }
 
 func Evaluate(in Input) Result {
