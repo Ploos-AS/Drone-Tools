@@ -26,13 +26,15 @@ type Subscription struct {
 }
 
 type GPSSample struct {
-	TimestampUS    uint64  `json:"timestamp_us,omitempty"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AltitudeMeters float64 `json:"altitude_m,omitempty"`
-	VelocityMPS    float64 `json:"velocity_mps,omitempty"`
-	FixType        uint8   `json:"fix_type,omitempty"`
-	SatellitesUsed uint8   `json:"satellites_used,omitempty"`
+	TimestampUS          uint64   `json:"timestamp_us,omitempty"`
+	Latitude             float64  `json:"latitude"`
+	Longitude            float64  `json:"longitude"`
+	AltitudeMeters       float64  `json:"altitude_m,omitempty"`
+	VelocityMPS          float64  `json:"velocity_mps,omitempty"`
+	FixType              uint8    `json:"fix_type,omitempty"`
+	SatellitesUsed       uint8    `json:"satellites_used,omitempty"`
+	HorizontalAccuracyM  *float64 `json:"horizontal_accuracy_m,omitempty"`
+	VerticalAccuracyM    *float64 `json:"vertical_accuracy_m,omitempty"`
 }
 
 type LocalPositionSample struct {
@@ -248,6 +250,14 @@ func decodeCoreTelemetry(out *Telemetry, name string, def formatDef, data []byte
 		}
 		s.FixType = uint8(uint64Value(def, data, "fix_type"))
 		s.SatellitesUsed = uint8(uint64Value(def, data, "satellites_used"))
+		if eph, ok := number(def, data, "eph"); ok && eph >= 0 && !math.IsNaN(eph) && !math.IsInf(eph, 0) {
+			v := eph
+			s.HorizontalAccuracyM = &v
+		}
+		if epv, ok := number(def, data, "epv"); ok && epv >= 0 && !math.IsNaN(epv) && !math.IsInf(epv, 0) {
+			v := epv
+			s.VerticalAccuracyM = &v
+		}
 		out.GPS = append(out.GPS, s)
 	case "vehicle_local_position":
 		s := LocalPositionSample{TimestampUS: uint64Value(def, data, "timestamp")}
