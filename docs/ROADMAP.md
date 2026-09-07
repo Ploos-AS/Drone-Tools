@@ -25,7 +25,9 @@
 - distance and bearing tools
 - 2D flight-track map
 
-## M2 - Flight logs
+## M2 - Flight logs — qualified
+
+Qualification: `docs/M2_QUALIFICATION.md`.
 
 - ArduPilot DataFlash BIN
 - MAVLink TLOG
