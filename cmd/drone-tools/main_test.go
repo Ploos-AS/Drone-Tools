@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -166,11 +167,14 @@ func TestULogAnalyzeEndpoint(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&analysis); err != nil {
 		t.Fatal(err)
 	}
-	if analysis.TrackPoints != 2 || analysis.DistanceMeters <= 0 || analysis.DurationSeconds == nil || analysis.BatteryVoltageV == nil {
+	if analysis.TrackPoints != 2 || analysis.DistanceMeters <= 0 || analysis.DurationSeconds == nil || analysis.BatteryVoltageV == nil || analysis.BatteryRemaining == nil {
 		t.Fatalf("unexpected ULog analysis: %+v", analysis)
 	}
-	if *analysis.BatteryVoltageV != 15.2 || *analysis.BatteryRemaining != 0.75 {
+	if math.Abs(*analysis.BatteryVoltageV-15.2) > 1e-5 || math.Abs(*analysis.BatteryRemaining-0.75) > 1e-6 {
 		t.Fatalf("unexpected battery analysis: %+v", analysis)
+	}
+	if analysis.ElevationGainMeters != 2 || analysis.ElevationLossMeters != 0 {
+		t.Fatalf("unexpected ULog elevation analysis: %+v", analysis)
 	}
 }
 
