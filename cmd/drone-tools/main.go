@@ -64,7 +64,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M2.0",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M1.5",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
