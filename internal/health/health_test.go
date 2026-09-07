@@ -5,9 +5,9 @@ import "testing"
 func TestEvaluateHealthyFlight(t *testing.T) {
 	start, end := 0.95, 0.42
 	result := Evaluate(Input{
-		GPS: GPSInput{Samples: 100},
+		GPS:     GPSInput{Samples: 100},
 		Battery: BatteryInput{Samples: 20, StartRemaining: &start, EndRemaining: &end},
-		Data: DataInput{TrackSamples: 100, TimedSamples: 100},
+		Data:    DataInput{TrackSamples: 100, TimedSamples: 100},
 	})
 	if result.Score != 100 || result.Status != "good" {
 		t.Fatalf("unexpected result: %+v", result)
@@ -19,9 +19,9 @@ func TestEvaluateHealthyFlight(t *testing.T) {
 
 func TestEvaluateDegradesGPSByRatio(t *testing.T) {
 	result := Evaluate(Input{
-		GPS: GPSInput{Samples: 100, LowFixSamples: 60, LowSatelliteSamples: 20},
+		GPS:     GPSInput{Samples: 100, LowFixSamples: 60, LowSatelliteSamples: 20},
 		Battery: BatteryInput{Samples: 1},
-		Data: DataInput{TrackSamples: 100, TimedSamples: 100},
+		Data:    DataInput{TrackSamples: 100, TimedSamples: 100},
 	})
 	if result.GPS.Score != 40 || result.GPS.Status != "poor" {
 		t.Fatalf("unexpected GPS component: %+v", result.GPS)
@@ -34,9 +34,9 @@ func TestEvaluateDegradesGPSByRatio(t *testing.T) {
 func TestEvaluateBatteryWarnings(t *testing.T) {
 	start, end := 0.50, 0.08
 	result := Evaluate(Input{
-		GPS: GPSInput{Samples: 10},
+		GPS:     GPSInput{Samples: 10},
 		Battery: BatteryInput{Samples: 10, StartRemaining: &start, EndRemaining: &end},
-		Data: DataInput{TrackSamples: 10, TimedSamples: 10},
+		Data:    DataInput{TrackSamples: 10, TimedSamples: 10},
 	})
 	if result.Battery.Score != 65 || result.Battery.Status != "attention" {
 		t.Fatalf("unexpected battery component: %+v", result.Battery)
@@ -58,9 +58,9 @@ func TestEvaluateMissingTelemetryIsExplicit(t *testing.T) {
 
 func TestEvaluateDataQualityPenalties(t *testing.T) {
 	result := Evaluate(Input{
-		GPS: GPSInput{Samples: 10},
+		GPS:     GPSInput{Samples: 10},
 		Battery: BatteryInput{Samples: 1},
-		Data: DataInput{TrackSamples: 10, TimedSamples: 1, NonMonotonicTimes: 2, InvalidCoordinates: 3},
+		Data:    DataInput{TrackSamples: 10, TimedSamples: 1, NonMonotonicTimes: 2, InvalidCoordinates: 3},
 	})
 	if result.Data.Score != 25 || result.Data.Status != "poor" {
 		t.Fatalf("unexpected data component: %+v", result.Data)
