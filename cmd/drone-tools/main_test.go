@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	geodata "github.com/Ploos-AS/Drone-Tools/internal/geo"
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
 )
@@ -46,8 +47,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M1.1" {
-		t.Fatalf("stage = %v, want M1.1", response["stage"])
+	if response["stage"] != "M1.2" {
+		t.Fatalf("stage = %v, want M1.2", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -75,19 +76,7 @@ func TestInspectEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", "flight.gpx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = part.Write([]byte("<gpx></gpx>"))
-	_ = writer.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/inspect", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := postFile(t, handler, "/api/v1/inspect", "flight.gpx", "<gpx></gpx>")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -105,19 +94,8 @@ func TestGPXSummaryEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", "flight.gpx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = part.Write([]byte(`<gpx version="1.1"><trk><trkseg><trkpt lat="58" lon="7"><ele>10</ele><time>2026-09-07T08:00:00Z</time></trkpt><trkpt lat="58.001" lon="7.002"><ele>20</ele><time>2026-09-07T08:01:00Z</time></trkpt></trkseg></trk></gpx>`))
-	_ = writer.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/gpx/summary", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	content := `<gpx version="1.1"><trk><trkseg><trkpt lat="58" lon="7"><ele>10</ele><time>2026-09-07T08:00:00Z</time></trkpt><trkpt lat="58.001" lon="7.002"><ele>20</ele><time>2026-09-07T08:01:00Z</time></trkpt></trkseg></trk></gpx>`
+	rr := postFile(t, handler, "/api/v1/gpx/summary", "flight.gpx", content)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -126,6 +104,44 @@ func TestGPXSummaryEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if summary.TrackPoints != 2 || summary.DistanceMeters <= 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestKMLSummaryEndpoint(t *testing.T) {
+	handler, err := newHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := `<kml><Document><Placemark><LineString><coordinates>7,58,10 7.1,58.1,20</coordinates></LineString></Placemark></Document></kml>`
+	rr := postFile(t, handler, "/api/v1/kml/summary", "flight.kml", content)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summary geodata.Summary
+	if err := json.NewDecoder(rr.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Format != "kml" || summary.LineStrings != 1 || summary.Coordinates != 2 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestGeoJSONSummaryEndpoint(t *testing.T) {
+	handler, err := newHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[7,58],[7.1,58.1]]}}]}`
+	rr := postFile(t, handler, "/api/v1/geojson/summary", "flight.geojson", content)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summary geodata.Summary
+	if err := json.NewDecoder(rr.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Format != "geojson" || summary.Features != 1 || summary.LineStrings != 1 || summary.Coordinates != 2 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
 }
@@ -148,4 +164,25 @@ func TestEnvOrDefault(t *testing.T) {
 	if got := envOrDefault(name, "fallback"); got != "configured" {
 		t.Fatalf("envOrDefault() = %q, want configured", got)
 	}
+}
+
+func postFile(t *testing.T, handler http.Handler, path, filename, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
 }
