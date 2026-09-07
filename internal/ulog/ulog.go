@@ -26,15 +26,15 @@ type Subscription struct {
 }
 
 type GPSSample struct {
-	TimestampUS          uint64   `json:"timestamp_us,omitempty"`
-	Latitude             float64  `json:"latitude"`
-	Longitude            float64  `json:"longitude"`
-	AltitudeMeters       float64  `json:"altitude_m,omitempty"`
-	VelocityMPS          float64  `json:"velocity_mps,omitempty"`
-	FixType              uint8    `json:"fix_type,omitempty"`
-	SatellitesUsed       uint8    `json:"satellites_used,omitempty"`
-	HorizontalAccuracyM  *float64 `json:"horizontal_accuracy_m,omitempty"`
-	VerticalAccuracyM    *float64 `json:"vertical_accuracy_m,omitempty"`
+	TimestampUS         uint64   `json:"timestamp_us,omitempty"`
+	Latitude            float64  `json:"latitude"`
+	Longitude           float64  `json:"longitude"`
+	AltitudeMeters      float64  `json:"altitude_m,omitempty"`
+	VelocityMPS         float64  `json:"velocity_mps,omitempty"`
+	FixType             uint8    `json:"fix_type,omitempty"`
+	SatellitesUsed      uint8    `json:"satellites_used,omitempty"`
+	HorizontalAccuracyM *float64 `json:"horizontal_accuracy_m,omitempty"`
+	VerticalAccuracyM   *float64 `json:"vertical_accuracy_m,omitempty"`
 }
 
 type LocalPositionSample struct {
