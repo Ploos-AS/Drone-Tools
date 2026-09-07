@@ -91,6 +91,53 @@ func TestLocalPositionAndBattery(t *testing.T) {
 	}
 }
 
+func TestFieldOrderAndFilteredBatteryVariants(t *testing.T) {
+	var b bytes.Buffer
+	b.Write([]byte{'U', 'L', 'o', 'g', 0x01, 0x12, 0x35, 1})
+	_ = binary.Write(&b, binary.LittleEndian, uint64(99))
+	writeMessage(&b, 'F', []byte("vehicle_gps_position:uint8_t fix_type;uint64_t timestamp;uint8_t satellites_used;float vel_m_s;int32_t alt;int32_t lon;int32_t lat;float eph;"))
+	writeMessage(&b, 'F', []byte("battery_status:float remaining;uint64_t timestamp;float current_filtered_a;float voltage_filtered_v;uint8_t warning;"))
+	writeMessage(&b, 'A', append([]byte{0, 20, 0}, []byte("vehicle_gps_position")...))
+	writeMessage(&b, 'A', append([]byte{0, 21, 0}, []byte("battery_status")...))
+
+	var gps bytes.Buffer
+	_ = binary.Write(&gps, binary.LittleEndian, uint16(20))
+	gps.WriteByte(4)
+	_ = binary.Write(&gps, binary.LittleEndian, uint64(7000000))
+	gps.WriteByte(19)
+	_ = binary.Write(&gps, binary.LittleEndian, float32(21.5))
+	_ = binary.Write(&gps, binary.LittleEndian, int32(345670))
+	_ = binary.Write(&gps, binary.LittleEndian, int32(74567890))
+	_ = binary.Write(&gps, binary.LittleEndian, int32(582345678))
+	_ = binary.Write(&gps, binary.LittleEndian, float32(0.8))
+	writeMessage(&b, 'D', gps.Bytes())
+
+	var battery bytes.Buffer
+	_ = binary.Write(&battery, binary.LittleEndian, uint16(21))
+	_ = binary.Write(&battery, binary.LittleEndian, float32(0.58))
+	_ = binary.Write(&battery, binary.LittleEndian, uint64(7000000))
+	_ = binary.Write(&battery, binary.LittleEndian, float32(9.1))
+	_ = binary.Write(&battery, binary.LittleEndian, float32(23.7))
+	battery.WriteByte(0)
+	writeMessage(&b, 'D', battery.Bytes())
+
+	s, err := Inspect(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Telemetry.GPS) != 1 || len(s.Telemetry.Battery) != 1 {
+		t.Fatalf("unexpected variant telemetry: %+v", s.Telemetry)
+	}
+	g := s.Telemetry.GPS[0]
+	if math.Abs(g.Latitude-58.2345678) > 1e-7 || math.Abs(g.Longitude-7.456789) > 1e-7 || math.Abs(g.AltitudeMeters-345.67) > 1e-6 || g.FixType != 4 || g.SatellitesUsed != 19 {
+		t.Fatalf("unexpected reordered GPS sample: %+v", g)
+	}
+	bat := s.Telemetry.Battery[0]
+	if math.Abs(bat.VoltageV-23.7) > 1e-5 || math.Abs(bat.CurrentA-9.1) > 1e-5 || math.Abs(bat.Remaining-0.58) > 1e-5 {
+		t.Fatalf("unexpected filtered battery sample: %+v", bat)
+	}
+}
+
 func TestInvalidHeader(t *testing.T) {
 	if _, err := Inspect(bytes.NewReader([]byte("not-ulog"))); err == nil {
 		t.Fatal("expected invalid header error")
