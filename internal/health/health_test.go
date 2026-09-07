@@ -12,7 +12,7 @@ func TestEvaluateHealthyFlight(t *testing.T) {
 	if result.Score != 100 || result.Status != "good" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if result.Algorithm != "m3.0-deterministic-v1" {
+	if result.Algorithm != "m3.3-deterministic-v2" {
 		t.Fatalf("algorithm = %q", result.Algorithm)
 	}
 }
@@ -24,6 +24,20 @@ func TestEvaluateDegradesGPSByRatio(t *testing.T) {
 		Data:    DataInput{TrackSamples: 100, TimedSamples: 100},
 	})
 	if result.GPS.Score != 40 || result.GPS.Status != "poor" {
+		t.Fatalf("unexpected GPS component: %+v", result.GPS)
+	}
+	if len(result.GPS.Findings) != 2 {
+		t.Fatalf("unexpected GPS findings: %+v", result.GPS.Findings)
+	}
+}
+
+func TestEvaluateGPSGapPenalties(t *testing.T) {
+	result := Evaluate(Input{
+		GPS:     GPSInput{Samples: 100, GapEvents: 2, MaxGapSeconds: 75},
+		Battery: BatteryInput{Samples: 1},
+		Data:    DataInput{TrackSamples: 100, TimedSamples: 100},
+	})
+	if result.GPS.Score != 70 || result.GPS.Status != "attention" {
 		t.Fatalf("unexpected GPS component: %+v", result.GPS)
 	}
 	if len(result.GPS.Findings) != 2 {
