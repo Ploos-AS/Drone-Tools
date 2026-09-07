@@ -25,23 +25,23 @@ type Bounds struct {
 }
 
 type Summary struct {
-	TrackPoints          int        `json:"track_points"`
-	Waypoints            int        `json:"waypoints"`
-	DistanceMeters       float64    `json:"distance_meters"`
-	Bounds               Bounds     `json:"bounds"`
-	MinElevation         *float64   `json:"min_elevation_m,omitempty"`
-	MaxElevation         *float64   `json:"max_elevation_m,omitempty"`
-	ElevationGainMeters  float64    `json:"elevation_gain_m"`
-	ElevationLossMeters  float64    `json:"elevation_loss_m"`
-	StartTime            *time.Time `json:"start_time,omitempty"`
-	EndTime              *time.Time `json:"end_time,omitempty"`
-	DurationSeconds      *float64   `json:"duration_seconds,omitempty"`
-	AverageSpeedMPS      *float64   `json:"average_speed_mps,omitempty"`
-	MaxSegmentSpeedMPS   *float64   `json:"max_segment_speed_mps,omitempty"`
-	TimedPoints          int        `json:"timed_points"`
-	ElevationPoints      int        `json:"elevation_points"`
-	Quality              string     `json:"quality"`
-	Warnings             []string   `json:"warnings,omitempty"`
+	TrackPoints         int        `json:"track_points"`
+	Waypoints           int        `json:"waypoints"`
+	DistanceMeters      float64    `json:"distance_meters"`
+	Bounds              Bounds     `json:"bounds"`
+	MinElevation        *float64   `json:"min_elevation_m,omitempty"`
+	MaxElevation        *float64   `json:"max_elevation_m,omitempty"`
+	ElevationGainMeters float64    `json:"elevation_gain_m"`
+	ElevationLossMeters float64    `json:"elevation_loss_m"`
+	StartTime           *time.Time `json:"start_time,omitempty"`
+	EndTime             *time.Time `json:"end_time,omitempty"`
+	DurationSeconds     *float64   `json:"duration_seconds,omitempty"`
+	AverageSpeedMPS     *float64   `json:"average_speed_mps,omitempty"`
+	MaxSegmentSpeedMPS  *float64   `json:"max_segment_speed_mps,omitempty"`
+	TimedPoints         int        `json:"timed_points"`
+	ElevationPoints     int        `json:"elevation_points"`
+	Quality             string     `json:"quality"`
+	Warnings            []string   `json:"warnings,omitempty"`
 }
 
 type xmlPoint struct {
