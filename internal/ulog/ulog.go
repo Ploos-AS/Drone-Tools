@@ -24,14 +24,14 @@ type Subscription struct {
 }
 
 type Summary struct {
-	Format          string            `json:"format"`
-	Version         uint8             `json:"version"`
-	StartTimestamp  uint64            `json:"start_timestamp_us"`
-	Messages        int               `json:"messages"`
-	MessageTypes    map[string]int    `json:"message_types"`
-	FormatNames     []string          `json:"format_names,omitempty"`
-	Subscriptions   []Subscription    `json:"subscriptions,omitempty"`
-	LoggedDataCount int               `json:"logged_data_messages"`
+	Format          string         `json:"format"`
+	Version         uint8          `json:"version"`
+	StartTimestamp  uint64         `json:"start_timestamp_us"`
+	Messages        int            `json:"messages"`
+	MessageTypes    map[string]int `json:"message_types"`
+	FormatNames     []string       `json:"format_names,omitempty"`
+	Subscriptions   []Subscription `json:"subscriptions,omitempty"`
+	LoggedDataCount int            `json:"logged_data_messages"`
 }
 
 func Inspect(r io.Reader) (Summary, error) {
@@ -87,9 +87,9 @@ func Inspect(r io.Reader) (Summary, error) {
 				return Summary{}, fmt.Errorf("%w: short subscription", ErrTruncated)
 			}
 			s.Subscriptions = append(s.Subscriptions, Subscription{
-				MultiID: payload[0],
+				MultiID:   payload[0],
 				MessageID: binary.LittleEndian.Uint16(payload[1:3]),
-				Name: strings.TrimSpace(string(payload[3:])),
+				Name:      strings.TrimSpace(string(payload[3:])),
 			})
 		case 'D':
 			s.LoggedDataCount++
