@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/Ploos-AS/Drone-Tools/internal/gpx"
 	"github.com/Ploos-AS/Drone-Tools/internal/inspector"
 	"github.com/Ploos-AS/Drone-Tools/internal/mapdata"
+	"github.com/Ploos-AS/Drone-Tools/internal/ulog"
 )
 
 func TestHealthz(t *testing.T) {
@@ -46,8 +48,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M1.5" {
-		t.Fatalf("stage = %v, want M1.5", response["stage"])
+	if response["stage"] != "M2.1" {
+		t.Fatalf("stage = %v, want M2.1", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -66,7 +68,7 @@ func TestIndex(t *testing.T) {
 	}
 	body := rr.Body.String()
 	if !strings.Contains(body, "Drone-Tools") || !strings.Contains(body, "Flight Analysis") {
-		t.Fatal("index response does not contain M1.5 analysis UI")
+		t.Fatal("index response does not contain analysis UI")
 	}
 }
 
@@ -120,6 +122,37 @@ func TestAnalyzeEndpoint(t *testing.T) {
 	}
 	if summary.Quality != "good" {
 		t.Fatalf("quality = %q, want good", summary.Quality)
+	}
+}
+
+func TestULogTelemetryEndpoint(t *testing.T) {
+	handler, _ := newHandler(t.TempDir())
+	var b bytes.Buffer
+	b.Write([]byte{'U', 'L', 'o', 'g', 0x01, 0x12, 0x35, 1})
+	_ = binary.Write(&b, binary.LittleEndian, uint64(1))
+	writeULogMessage(&b, 'F', []byte("vehicle_gps_position:uint64_t timestamp;int32_t lat;int32_t lon;int32_t alt;float vel_m_s;uint8_t fix_type;uint8_t satellites_used;"))
+	writeULogMessage(&b, 'A', append([]byte{0, 7, 0}, []byte("vehicle_gps_position")...))
+	var data bytes.Buffer
+	_ = binary.Write(&data, binary.LittleEndian, uint16(7))
+	_ = binary.Write(&data, binary.LittleEndian, uint64(2))
+	_ = binary.Write(&data, binary.LittleEndian, int32(580000000))
+	_ = binary.Write(&data, binary.LittleEndian, int32(70000000))
+	_ = binary.Write(&data, binary.LittleEndian, int32(100000))
+	_ = binary.Write(&data, binary.LittleEndian, float32(10))
+	data.WriteByte(3)
+	data.WriteByte(12)
+	writeULogMessage(&b, 'D', data.Bytes())
+
+	rr := postFile(t, handler, "/api/v1/ulog/telemetry", "flight.ulg", b.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summary ulog.Summary
+	if err := json.NewDecoder(rr.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Telemetry.GPS) != 1 || summary.Telemetry.GPS[0].Latitude != 58 {
+		t.Fatalf("unexpected ULog telemetry: %+v", summary.Telemetry)
 	}
 }
 
@@ -186,6 +219,12 @@ func TestEnvOrDefault(t *testing.T) {
 	if got := envOrDefault(name, "fallback"); got != "configured" {
 		t.Fatalf("envOrDefault() = %q, want configured", got)
 	}
+}
+
+func writeULogMessage(b *bytes.Buffer, typ byte, payload []byte) {
+	_ = binary.Write(b, binary.LittleEndian, uint16(len(payload)))
+	b.WriteByte(typ)
+	b.Write(payload)
 }
 
 func postFile(t *testing.T, handler http.Handler, path, filename, content string) *httptest.ResponseRecorder {
