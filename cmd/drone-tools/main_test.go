@@ -46,8 +46,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M1.4" {
-		t.Fatalf("stage = %v, want M1.4", response["stage"])
+	if response["stage"] != "M1.5" {
+		t.Fatalf("stage = %v, want M1.5", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
@@ -64,8 +64,9 @@ func TestIndex(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "Drone-Tools") {
-		t.Fatal("index response does not contain Drone-Tools")
+	body := rr.Body.String()
+	if !strings.Contains(body, "Drone-Tools") || !strings.Contains(body, "Flight Analysis") {
+		t.Fatal("index response does not contain M1.5 analysis UI")
 	}
 }
 
