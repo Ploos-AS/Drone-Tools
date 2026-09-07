@@ -6,6 +6,8 @@ type GPSInput struct {
 	Samples             int
 	LowFixSamples       int
 	LowSatelliteSamples int
+	GapEvents           int
+	MaxGapSeconds       float64
 }
 
 type BatteryInput struct {
@@ -50,9 +52,7 @@ func Evaluate(in Input) Result {
 	battery := evaluateBattery(in.Battery)
 	data := evaluateData(in.Data)
 
-	// M3.0 weights are intentionally simple and deterministic.
-	// GPS and data quality affect whether a flight analysis is trustworthy;
-	// battery health is weighted slightly lower because not every log carries it.
+	// M3 weights remain stable: GPS 40%, data quality 35%, battery 25%.
 	score := int(math.Round(float64(gps.Score)*0.4 + float64(data.Score)*0.35 + float64(battery.Score)*0.25))
 	result := Result{
 		Score:     clamp(score),
@@ -60,7 +60,7 @@ func Evaluate(in Input) Result {
 		GPS:       gps,
 		Battery:   battery,
 		Data:      data,
-		Algorithm: "m3.0-deterministic-v1",
+		Algorithm: "m3.3-deterministic-v2",
 	}
 	result.Findings = append(result.Findings, gps.Findings...)
 	result.Findings = append(result.Findings, battery.Findings...)
@@ -85,6 +85,21 @@ func evaluateGPS(in GPSInput) Component {
 		ratio := float64(in.LowSatelliteSamples) / float64(in.Samples)
 		c.Score -= penaltyByRatio(ratio, 5, 15, 30)
 		c.Findings = append(c.Findings, "GPS includes samples with fewer than 6 satellites")
+	}
+	if in.GapEvents > 0 {
+		switch {
+		case in.GapEvents >= 4:
+			c.Score -= 35
+		case in.GapEvents >= 2:
+			c.Score -= 20
+		default:
+			c.Score -= 10
+		}
+		c.Findings = append(c.Findings, "GPS timestamp gaps suggest telemetry dropouts")
+	}
+	if in.MaxGapSeconds >= 60 {
+		c.Score -= 10
+		c.Findings = append(c.Findings, "GPS includes a gap of at least 60 seconds")
 	}
 	c.Score = clamp(c.Score)
 	c.Status = statusForScore(c.Score)
