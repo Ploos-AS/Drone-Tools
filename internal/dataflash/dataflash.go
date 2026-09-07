@@ -31,13 +31,14 @@ type Format struct {
 }
 
 type GPSSample struct {
-	TimestampUS    uint64  `json:"timestamp_us,omitempty"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	AltitudeMeters float64 `json:"altitude_m,omitempty"`
-	SpeedMPS       float64 `json:"speed_mps,omitempty"`
-	Status         uint8   `json:"status,omitempty"`
-	Satellites     uint8   `json:"satellites,omitempty"`
+	TimestampUS    uint64   `json:"timestamp_us,omitempty"`
+	Latitude       float64  `json:"latitude"`
+	Longitude      float64  `json:"longitude"`
+	AltitudeMeters float64  `json:"altitude_m,omitempty"`
+	SpeedMPS       float64  `json:"speed_mps,omitempty"`
+	Status         uint8    `json:"status,omitempty"`
+	Satellites     uint8    `json:"satellites,omitempty"`
+	HDOP           *float64 `json:"hdop,omitempty"`
 }
 
 type BatterySample struct {
@@ -167,6 +168,10 @@ func decodeCoreTelemetry(out *Telemetry, f Format, payload []byte) {
 		}
 		if v, ok := firstFieldNumber(f, payload, "NSats", "Sats"); ok && v >= 0 {
 			sample.Satellites = uint8(v)
+		}
+		if v, ok := firstFieldNumber(f, payload, "HDop", "HDOP"); ok && v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0) {
+			hdop := v
+			sample.HDOP = &hdop
 		}
 		out.GPS = append(out.GPS, sample)
 	case "BAT", "BAT2":
