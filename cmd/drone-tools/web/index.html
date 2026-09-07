@@ -10,6 +10,10 @@
     main { max-width: 900px; margin: 0 auto; padding: 4rem 1.5rem; }
     h1 { font-size: 3rem; margin-bottom: .5rem; }
     .card { margin-top: 2rem; padding: 1.5rem; border: 1px solid #374151; border-radius: 1rem; background: #1f2937; }
+    input, button { font: inherit; }
+    input[type=file] { display: block; margin: 1rem 0; }
+    button { padding: .65rem 1rem; border-radius: .6rem; border: 0; cursor: pointer; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #111827; padding: 1rem; border-radius: .6rem; }
     code { color: #a7f3d0; }
   </style>
 </head>
@@ -17,11 +21,39 @@
 <main>
   <h1>Drone-Tools</h1>
   <p>Privacy-first, self-hosted tools for drone hobbyists.</p>
-  <div class="card">
-    <strong>M0 foundation is running.</strong>
-    <p>Next milestones will add flight-file inspection, maps, telemetry analysis and coordinate tools.</p>
-    <p>Health endpoint: <code>/healthz</code></p>
-  </div>
+  <section class="card">
+    <h2>File Inspector</h2>
+    <p>Inspect a flight-related file locally. M1.0 identifies supported formats, size, media type and SHA-256. Maximum size: 32 MiB.</p>
+    <form id="inspect-form">
+      <input id="file" name="file" type="file" required>
+      <button type="submit">Inspect file</button>
+    </form>
+    <pre id="result">Select a file to inspect.</pre>
+  </section>
+  <section class="card">
+    <strong>M1.0 foundation</strong>
+    <p>Recognized: GPX, KML, KMZ, GeoJSON, PX4 ULog, MAVLink TLOG and ArduPilot BIN. Parsing comes in the next milestones.</p>
+  </section>
 </main>
+<script>
+const form = document.getElementById('inspect-form');
+const result = document.getElementById('result');
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = document.getElementById('file').files[0];
+  if (!file) return;
+  result.textContent = 'Inspecting…';
+  const body = new FormData();
+  body.append('file', file);
+  try {
+    const response = await fetch('/api/v1/inspect', { method: 'POST', body });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text.trim() || `HTTP ${response.status}`);
+    result.textContent = JSON.stringify(JSON.parse(text), null, 2);
+  } catch (error) {
+    result.textContent = `Error: ${error.message}`;
+  }
+});
+</script>
 </body>
 </html>
