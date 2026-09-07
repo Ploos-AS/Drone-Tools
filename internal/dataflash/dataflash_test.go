@@ -26,13 +26,13 @@ func TestInspect(t *testing.T) {
 
 func TestTelemetryDecode(t *testing.T) {
 	var b bytes.Buffer
-	b.Write(formatFrame(42, 30, "GPS", "QBLLfBB", "TimeUS,Lat,Lng,Alt,Spd,Status,NSats"))
+	b.Write(formatFrame(42, 29, "GPS", "QLLffBB", "TimeUS,Lat,Lng,Alt,Spd,Status,NSats"))
 	var gps bytes.Buffer
 	gps.Write([]byte{head1, head2, 42})
 	_ = binary.Write(&gps, binary.LittleEndian, uint64(2000000))
 	_ = binary.Write(&gps, binary.LittleEndian, int32(580000000))
 	_ = binary.Write(&gps, binary.LittleEndian, int32(70000000))
-	_ = binary.Write(&gps, binary.LittleEndian, int32(1230000000))
+	_ = binary.Write(&gps, binary.LittleEndian, float32(123.0))
 	_ = binary.Write(&gps, binary.LittleEndian, float32(12.5))
 	gps.WriteByte(3)
 	gps.WriteByte(11)
@@ -55,7 +55,7 @@ func TestTelemetryDecode(t *testing.T) {
 		t.Fatalf("unexpected telemetry: %+v", s.Telemetry)
 	}
 	g := s.Telemetry.GPS[0]
-	if g.Latitude != 58 || g.Longitude != 7 || math.Abs(g.SpeedMPS-12.5) > 0.001 || g.Status != 3 || g.Satellites != 11 {
+	if g.Latitude != 58 || g.Longitude != 7 || math.Abs(g.AltitudeMeters-123) > 0.001 || math.Abs(g.SpeedMPS-12.5) > 0.001 || g.Status != 3 || g.Satellites != 11 {
 		t.Fatalf("unexpected GPS sample: %+v", g)
 	}
 	batSample := s.Telemetry.Battery[0]
