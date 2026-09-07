@@ -28,9 +28,27 @@ func main() {
 		log.Fatalf("create data directory: %v", err)
 	}
 
+	handler, err := newHandler(dataDir)
+	if err != nil {
+		log.Fatalf("prepare HTTP handler: %v", err)
+	}
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	log.Printf("Drone-Tools M0 listening on %s", addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(fmt.Errorf("server: %w", err))
+	}
+}
+
+func newHandler(dataDir string) (http.Handler, error) {
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
-		log.Fatalf("prepare embedded web assets: %v", err)
+		return nil, fmt.Errorf("prepare embedded web assets: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -52,16 +70,7 @@ func main() {
 		})
 	})
 
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	log.Printf("Drone-Tools M0 listening on %s", addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(fmt.Errorf("server: %w", err))
-	}
+	return mux, nil
 }
 
 func envOrDefault(name, fallback string) string {
