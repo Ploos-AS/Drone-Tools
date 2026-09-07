@@ -55,16 +55,12 @@ func Inspect(r io.Reader) (Summary, error) {
 		timestamp := binary.BigEndian.Uint64(data[offset : offset+8])
 		offset += 8
 
-		magic := data[offset]
 		frameLength, msgID, sysID, compID, signed, version, err := frameInfo(data[offset:])
 		if err != nil {
 			return Summary{}, err
 		}
 		if frameLength > len(data)-offset {
 			return Summary{}, ErrTruncated
-		}
-		if magic != mavlinkV1Magic && magic != mavlinkV2Magic {
-			return Summary{}, ErrInvalidLog
 		}
 
 		s.Records++
@@ -102,18 +98,25 @@ func Inspect(r io.Reader) (Summary, error) {
 }
 
 func frameInfo(data []byte) (length int, msgID uint32, sysID, compID uint8, signed bool, version int, err error) {
-	if len(data) < 2 {
+	if len(data) == 0 {
 		return 0, 0, 0, 0, false, 0, ErrTruncated
 	}
-	payloadLength := int(data[1])
 	switch data[0] {
 	case mavlinkV1Magic:
+		if len(data) < 2 {
+			return 0, 0, 0, 0, false, 0, ErrTruncated
+		}
+		payloadLength := int(data[1])
 		length = 8 + payloadLength
 		if len(data) < length || len(data) < 6 {
 			return 0, 0, 0, 0, false, 0, ErrTruncated
 		}
 		return length, uint32(data[5]), data[3], data[4], false, 1, nil
 	case mavlinkV2Magic:
+		if len(data) < 2 {
+			return 0, 0, 0, 0, false, 0, ErrTruncated
+		}
+		payloadLength := int(data[1])
 		if len(data) < 10 {
 			return 0, 0, 0, 0, false, 0, ErrTruncated
 		}
