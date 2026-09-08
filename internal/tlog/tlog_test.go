@@ -21,6 +21,9 @@ func TestInspectMixedMAVLinkVersions(t *testing.T) {
 	if s.Format != "mavlink-tlog" || s.Records != 3 || s.MAVLink1Records != 1 || s.MAVLink2Records != 2 || s.SignedRecords != 1 {
 		t.Fatalf("unexpected summary: %+v", s)
 	}
+	if s.ChecksumValidatedRecords != 2 {
+		t.Fatalf("checksum validated = %d, want 2", s.ChecksumValidatedRecords)
+	}
 	if s.StartTimestampUS != 1_000_000 || s.EndTimestampUS != 3_000_000 {
 		t.Fatalf("unexpected timestamps: %+v", s)
 	}
@@ -74,6 +77,9 @@ func TestDecodeCoreTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.ChecksumValidatedRecords != 4 {
+		t.Fatalf("checksum validated = %d, want 4", s.ChecksumValidatedRecords)
+	}
 	if len(s.Telemetry.GPS) != 2 || len(s.Telemetry.Battery) != 2 {
 		t.Fatalf("unexpected telemetry: %+v", s.Telemetry)
 	}
@@ -90,6 +96,16 @@ func TestDecodeCoreTelemetry(t *testing.T) {
 	}
 	if math.Abs(s.Telemetry.Battery[1].VoltageV-15.2) > 1e-9 || math.Abs(s.Telemetry.Battery[1].CurrentA-7) > 1e-9 || s.Telemetry.Battery[1].Remaining != 0.70 {
 		t.Fatalf("unexpected BATTERY_STATUS battery: %+v", s.Telemetry.Battery[1])
+	}
+}
+
+func TestRejectsInvalidCoreChecksum(t *testing.T) {
+	frame := mavlinkV1Frame(1, 1, msgGPSRawInt, make([]byte, 30))
+	frame[len(frame)-1] ^= 0xff
+	var b bytes.Buffer
+	writeRecord(&b, 1_000_000, frame)
+	if _, err := Inspect(bytes.NewReader(b.Bytes())); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("err = %v, want ErrChecksum", err)
 	}
 }
 
@@ -119,7 +135,7 @@ func writeRecord(b *bytes.Buffer, timestamp uint64, frame []byte) {
 func mavlinkV1Frame(sysID, compID byte, msgID uint32, payload []byte) []byte {
 	frame := []byte{mavlinkV1Magic, byte(len(payload)), 1, sysID, compID, byte(msgID)}
 	frame = append(frame, payload...)
-	return append(frame, 0, 0)
+	return appendTestChecksum(frame, msgID)
 }
 
 func mavlinkV2Frame(sysID, compID byte, msgID uint32, payload []byte, signed bool) []byte {
@@ -132,9 +148,22 @@ func mavlinkV2Frame(sysID, compID byte, msgID uint32, payload []byte, signed boo
 		byte(msgID), byte(msgID >> 8), byte(msgID >> 16),
 	}
 	frame = append(frame, payload...)
-	frame = append(frame, 0, 0)
+	frame = appendTestChecksum(frame, msgID)
 	if signed {
 		frame = append(frame, make([]byte, 13)...)
 	}
 	return frame
+}
+
+func appendTestChecksum(frame []byte, msgID uint32) []byte {
+	extra, ok := coreCRCExtra[msgID]
+	if !ok {
+		return append(frame, 0, 0)
+	}
+	crc := uint16(0xffff)
+	for _, b := range frame[1:] {
+		crc = x25Accumulate(crc, b)
+	}
+	crc = x25Accumulate(crc, extra)
+	return append(frame, byte(crc), byte(crc>>8))
 }
