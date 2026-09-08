@@ -29,10 +29,17 @@ type DataInput struct {
 	InvalidCoordinates int
 }
 
+type LinkInput struct {
+	Samples               int
+	LowTxBufferSamples    int
+	RxErrorIncreaseEvents int
+}
+
 type Input struct {
 	GPS     GPSInput
 	Battery BatteryInput
 	Data    DataInput
+	Link    LinkInput
 }
 
 type Component struct {
@@ -41,34 +48,53 @@ type Component struct {
 	Findings []string `json:"findings,omitempty"`
 }
 
+type OptionalComponent struct {
+	Available bool     `json:"available"`
+	Score     *int     `json:"score,omitempty"`
+	Status    string   `json:"status"`
+	Findings  []string `json:"findings,omitempty"`
+}
+
 type Result struct {
-	Score     int       `json:"score"`
-	Status    string    `json:"status"`
-	GPS       Component `json:"gps"`
-	Battery   Component `json:"battery"`
-	Data      Component `json:"data_quality"`
-	Findings  []string  `json:"findings,omitempty"`
-	Algorithm string    `json:"algorithm"`
+	Score     int               `json:"score"`
+	Status    string            `json:"status"`
+	GPS       Component         `json:"gps"`
+	Battery   Component         `json:"battery"`
+	Data      Component         `json:"data_quality"`
+	Link      OptionalComponent `json:"link"`
+	Findings  []string          `json:"findings,omitempty"`
+	Algorithm string            `json:"algorithm"`
 }
 
 func Evaluate(in Input) Result {
 	gps := evaluateGPS(in.GPS)
 	battery := evaluateBattery(in.Battery)
 	data := evaluateData(in.Data)
+	link := evaluateLink(in.Link)
 
-	// M3 weights remain stable: GPS 40%, data quality 35%, battery 25%.
-	score := int(math.Round(float64(gps.Score)*0.4 + float64(data.Score)*0.35 + float64(battery.Score)*0.25))
+	// M3 baseline weights remain stable: GPS 40%, data quality 35%, battery 25%.
+	baseScore := int(math.Round(float64(gps.Score)*0.4 + float64(data.Score)*0.35 + float64(battery.Score)*0.25))
+	score := baseScore
+	if link.Available && link.Score != nil {
+		// Link health is an optional 15% overlay. Missing link telemetry leaves the
+		// established GPS/data/battery score unchanged.
+		score = int(math.Round(float64(baseScore)*0.85 + float64(*link.Score)*0.15))
+	}
 	result := Result{
 		Score:     clamp(score),
 		Status:    statusForScore(score),
 		GPS:       gps,
 		Battery:   battery,
 		Data:      data,
-		Algorithm: "m3.4-deterministic-v3",
+		Link:      link,
+		Algorithm: "m3.12-deterministic-v4",
 	}
 	result.Findings = append(result.Findings, gps.Findings...)
 	result.Findings = append(result.Findings, battery.Findings...)
 	result.Findings = append(result.Findings, data.Findings...)
+	if link.Available {
+		result.Findings = append(result.Findings, link.Findings...)
+	}
 	return result
 }
 
@@ -184,6 +210,38 @@ func evaluateData(in DataInput) Component {
 	c.Score = clamp(c.Score)
 	c.Status = statusForScore(c.Score)
 	return c
+}
+
+func evaluateLink(in LinkInput) OptionalComponent {
+	if in.Samples == 0 {
+		return OptionalComponent{Status: "unavailable"}
+	}
+
+	score := 100
+	findings := []string{}
+	if in.LowTxBufferSamples > 0 {
+		ratio := float64(in.LowTxBufferSamples) / float64(in.Samples)
+		score -= penaltyByRatio(ratio, 10, 25, 45)
+		findings = append(findings, "radio transmit buffer was low")
+	}
+	if in.RxErrorIncreaseEvents > 0 {
+		switch {
+		case in.RxErrorIncreaseEvents >= 4:
+			score -= 35
+		case in.RxErrorIncreaseEvents >= 2:
+			score -= 20
+		default:
+			score -= 10
+		}
+		findings = append(findings, "radio receive error counter increased")
+	}
+	score = clamp(score)
+	return OptionalComponent{
+		Available: true,
+		Score:     &score,
+		Status:    statusForScore(score),
+		Findings:  findings,
+	}
 }
 
 func penaltyByRatio(ratio float64, low, medium, high int) int {
