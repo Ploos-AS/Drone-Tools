@@ -85,6 +85,28 @@ func TestTLOGTrackPrefersGlobalPositionAndSorts(t *testing.T) {
 	}
 }
 
+func TestTLOGTrackRejectsZeroCoordinate(t *testing.T) {
+	samples := []tlog.GPSSample{
+		{Source: "GLOBAL_POSITION_INT", TimestampUS: 1, Latitude: 0, Longitude: 0},
+		{Source: "GLOBAL_POSITION_INT", TimestampUS: 2, Latitude: 58, Longitude: 7},
+	}
+	track := tlogTrackSamples(samples)
+	if len(track) != 1 || track[0].Latitude != 58 || track[0].Longitude != 7 {
+		t.Fatalf("unexpected filtered track: %+v", track)
+	}
+}
+
+func TestAnalyzeTLOGIgnoresUnknownGPSRawSpeed(t *testing.T) {
+	telemetry := tlog.Telemetry{GPS: []tlog.GPSSample{
+		{Source: "GPS_RAW_INT", TimestampUS: 1_000_000, Latitude: 58, Longitude: 7, SpeedMPS: 655.35, FixType: 3, Satellites: 10},
+		{Source: "GPS_RAW_INT", TimestampUS: 2_000_000, Latitude: 58.001, Longitude: 7.001, SpeedMPS: 12.5, FixType: 3, Satellites: 10},
+	}}
+	analysis := analyzeTLOG(telemetry)
+	if analysis.MaxSegmentSpeedMPS == nil || math.Abs(*analysis.MaxSegmentSpeedMPS-12.5) > 1e-9 {
+		t.Fatalf("unexpected max speed: %+v", analysis.MaxSegmentSpeedMPS)
+	}
+}
+
 func TestPreferredTLOGBatteryUsesBatteryStatus(t *testing.T) {
 	samples := []tlog.BatterySample{
 		{Source: "BATTERY_STATUS", TimestampUS: 2, VoltageV: 15.0, Remaining: 0.60},
