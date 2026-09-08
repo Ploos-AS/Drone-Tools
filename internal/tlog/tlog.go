@@ -141,7 +141,7 @@ func Inspect(r io.Reader) (Summary, error) {
 		s.MessageIDs[msgID]++
 		key := uint16(sysID)<<8 | uint16(compID)
 		endpoints[key] = Endpoint{SystemID: sysID, ComponentID: compID}
-		decodeCoreTelemetry(&s.Telemetry, msgID, timestamp, framePayload(frame, version))
+		decodeCoreTelemetry(&s.Telemetry, msgID, timestamp, version, framePayload(frame, version))
 		offset = frameStart + frameLength
 	}
 
@@ -217,10 +217,23 @@ func framePayload(frame []byte, version int) []byte {
 	return frame[start : start+payloadLength]
 }
 
-func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64, payload []byte) {
+func decodePayload(payload []byte, version, minimum int) ([]byte, bool) {
+	if len(payload) >= minimum {
+		return payload, true
+	}
+	if version != 2 || len(payload) == 0 {
+		return nil, false
+	}
+	padded := make([]byte, minimum)
+	copy(padded, payload)
+	return padded, true
+}
+
+func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64, version int, payload []byte) {
 	switch msgID {
 	case msgGPSRawInt:
-		if len(payload) < 30 {
+		payload, ok := decodePayload(payload, version, 30)
+		if !ok {
 			return
 		}
 		timestamp := binary.LittleEndian.Uint64(payload[0:8])
@@ -252,7 +265,8 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		}
 		out.GPS = append(out.GPS, sample)
 	case msgGlobalPositionInt:
-		if len(payload) < 28 {
+		payload, ok := decodePayload(payload, version, 28)
+		if !ok {
 			return
 		}
 		lat := float64(int32(binary.LittleEndian.Uint32(payload[4:8]))) / 1e7
@@ -271,7 +285,8 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 			SpeedMPS:       math.Hypot(vx, vy),
 		})
 	case msgSysStatus:
-		if len(payload) < 19 {
+		payload, ok := decodePayload(payload, version, 19)
+		if !ok {
 			return
 		}
 		voltageMV := binary.LittleEndian.Uint16(payload[14:16])
@@ -295,7 +310,8 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 			out.Battery = append(out.Battery, sample)
 		}
 	case msgBatteryStatus:
-		if len(payload) < 36 {
+		payload, ok := decodePayload(payload, version, 36)
+		if !ok {
 			return
 		}
 		sample := BatterySample{Source: "BATTERY_STATUS", TimestampUS: recordTimestampUS}
