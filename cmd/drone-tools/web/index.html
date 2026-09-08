@@ -29,7 +29,7 @@
     .health-summary { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 2fr); gap: 1rem; margin-top: 1rem; }
     .health-score { background: #111827; border-radius: .75rem; padding: 1rem; text-align: center; }
     .health-score strong { display: block; font-size: 3rem; line-height: 1; margin: .35rem 0; }
-    .health-components { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }
+    .health-components { display: grid; grid-template-columns: repeat(4, 1fr); gap: .7rem; }
     .health-component { background: #111827; border-radius: .75rem; padding: .9rem; }
     .health-component strong { display: block; font-size: 1.5rem; margin-top: .25rem; }
     .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.25rem; }
@@ -49,7 +49,7 @@
 
   <section class="card">
     <h2>Flight Workspace</h2>
-    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, MAVLink TLOG, KML or GeoJSON to render a flight locally. GPX, ULog, DataFlash and TLOG also get Flight Analysis and local telemetry charts. ULog, DataFlash and TLOG additionally get deterministic Flight Health scoring.</p>
+    <p>Load GPX, PX4 ULog, ArduPilot DataFlash, MAVLink TLOG, KML or GeoJSON to render a flight locally. GPX, ULog, DataFlash and TLOG also get Flight Analysis and local telemetry charts. ULog, DataFlash and TLOG additionally get deterministic Flight Health scoring, including radio/link health when MAVLink RADIO_STATUS telemetry is available.</p>
     <form id="flight-form">
       <input id="flight-file" name="file" type="file" accept=".gpx,.ulg,.bin,.tlog,.kml,.geojson,.json" required>
       <button type="submit">Analyze flight</button>
@@ -98,6 +98,7 @@
           <div class="health-component">GPS<strong id="health-gps-score">—</strong><span id="health-gps-status" class="meta">—</span></div>
           <div class="health-component">Battery<strong id="health-battery-score">—</strong><span id="health-battery-status" class="meta">—</span></div>
           <div class="health-component">Data quality<strong id="health-data-score">—</strong><span id="health-data-status" class="meta">—</span></div>
+          <div class="health-component">Link<strong id="health-link-score">—</strong><span id="health-link-status" class="meta">not available</span></div>
         </div>
       </div>
       <h3>Findings</h3>
@@ -240,6 +241,8 @@ function clearHealth() {
   document.getElementById('health-panel').classList.add('hidden');
   document.getElementById('health-findings').replaceChildren();
   document.getElementById('health-status').textContent = 'Deterministic, explainable scoring from the uploaded telemetry.';
+  document.getElementById('health-link-score').textContent = '—';
+  document.getElementById('health-link-status').textContent = 'not available';
   document.getElementById('health-algorithm').textContent = '';
 }
 
@@ -254,6 +257,13 @@ function renderHealth(h) {
   document.getElementById('health-battery-status').textContent = h.battery?.status || 'unknown';
   document.getElementById('health-data-score').textContent = `${h.data_quality?.score ?? 0}/100`;
   document.getElementById('health-data-status').textContent = h.data_quality?.status || 'unknown';
+  if (h.link?.available) {
+    document.getElementById('health-link-score').textContent = `${h.link.score ?? 0}/100`;
+    document.getElementById('health-link-status').textContent = h.link.status || 'unknown';
+  } else {
+    document.getElementById('health-link-score').textContent = '—';
+    document.getElementById('health-link-status').textContent = 'not available';
+  }
   document.getElementById('health-algorithm').textContent = h.algorithm ? `Scoring algorithm: ${h.algorithm}` : '';
 
   const findings = document.getElementById('health-findings');
