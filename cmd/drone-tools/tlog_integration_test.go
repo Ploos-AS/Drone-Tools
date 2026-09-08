@@ -63,6 +63,39 @@ func TestTLOGWorkspaceEndpoints(t *testing.T) {
 	}
 }
 
+func TestTLOGTrackPrefersGlobalPositionAndSorts(t *testing.T) {
+	samples := []tlog.GPSSample{
+		{Source: "GPS_RAW_INT", TimestampUS: 1, Latitude: 1, Longitude: 1},
+		{Source: "GLOBAL_POSITION_INT", TimestampUS: 3, Latitude: 58.003, Longitude: 7.003},
+		{Source: "GPS_RAW_INT", TimestampUS: 2, Latitude: 80, Longitude: 80},
+		{Source: "GLOBAL_POSITION_INT", TimestampUS: 1, Latitude: 58.001, Longitude: 7.001},
+	}
+	track := tlogTrackSamples(samples)
+	if len(track) != 2 {
+		t.Fatalf("track len = %d, want 2", len(track))
+	}
+	if track[0].Source != "GLOBAL_POSITION_INT" || track[1].Source != "GLOBAL_POSITION_INT" {
+		t.Fatalf("unexpected sources: %+v", track)
+	}
+	if track[0].TimestampUS != 1 || track[1].TimestampUS != 3 {
+		t.Fatalf("track is not timestamp sorted: %+v", track)
+	}
+}
+
+func TestPreferredTLOGBatteryUsesBatteryStatus(t *testing.T) {
+	samples := []tlog.BatterySample{
+		{Source: "BATTERY_STATUS", TimestampUS: 2, VoltageV: 15.0, Remaining: 0.60},
+		{Source: "SYS_STATUS", TimestampUS: 3, VoltageV: 14.0, Remaining: 0.50},
+	}
+	got, ok := preferredTLOGBattery(samples)
+	if !ok {
+		t.Fatal("expected battery sample")
+	}
+	if got.Source != "BATTERY_STATUS" || got.TimestampUS != 2 {
+		t.Fatalf("unexpected battery selection: %+v", got)
+	}
+}
+
 func buildTLOGWorkspaceFixture() string {
 	var b bytes.Buffer
 	writeTLOGRecord(&b, 1_000_000, mavlink1TestFrame(1, 1, 24, gpsRawPayload(1_000_000, 580000000, 70000000, 100000, 1000, 3, 12)))
