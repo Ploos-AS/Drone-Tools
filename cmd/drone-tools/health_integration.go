@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	maxHDOP                = 2.5
-	maxVDOP                = 3.5
-	maxHorizontalAccuracyM = 5.0
-	maxVerticalAccuracyM   = 8.0
+	maxHDOP                 = 2.5
+	maxVDOP                 = 3.5
+	maxHorizontalAccuracyM  = 5.0
+	maxVerticalAccuracyM    = 8.0
+	minRadioTxBufferPercent = 20
 )
 
 func flightHealthHandler(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +57,7 @@ func flightHealthHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid MAVLink TLOG file", http.StatusBadRequest)
 			return
 		}
-		input = healthInputFromTLOGWithRoles(summary.Telemetry, summary.EndpointRoles)
+		input = healthInputFromTLOGDetailed(summary)
 	default:
 		http.Error(w, "flight health currently supports .ulg, .bin and .tlog", http.StatusBadRequest)
 		return
@@ -130,6 +131,12 @@ func healthInputFromDataFlash(telemetry dataflash.Telemetry) health.Input {
 
 func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 	return healthInputFromTLOGWithRoles(telemetry, nil)
+}
+
+func healthInputFromTLOGDetailed(summary tlog.DetailedSummary) health.Input {
+	in := healthInputFromTLOGWithRoles(summary.Telemetry, summary.EndpointRoles)
+	accumulateTLOGLink(&in.Link, summary.Radio)
+	return in
 }
 
 func healthInputFromTLOGWithRoles(telemetry tlog.Telemetry, roles []tlog.EndpointRole) health.Input {
@@ -219,6 +226,23 @@ func filterTLOGBatteryByEndpoint(samples []tlog.BatterySample, endpoint tlogEndp
 		}
 	}
 	return filtered
+}
+
+func accumulateTLOGLink(out *health.LinkInput, samples []tlog.RadioSample) {
+	lastErrors := map[uint16]uint16{}
+	haveLast := map[uint16]bool{}
+	for _, sample := range samples {
+		out.Samples++
+		if sample.TxBufferPct < minRadioTxBufferPercent {
+			out.LowTxBufferSamples++
+		}
+		key := uint16(sample.SystemID)<<8 | uint16(sample.ComponentID)
+		if haveLast[key] && sample.RxErrors > lastErrors[key] {
+			out.RxErrorIncreaseEvents++
+		}
+		lastErrors[key] = sample.RxErrors
+		haveLast[key] = true
+	}
 }
 
 func accumulateGPSGaps(gps *health.GPSInput, timestamps []uint64) {
