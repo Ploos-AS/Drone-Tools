@@ -11,16 +11,16 @@ const (
 )
 
 type RadioSample struct {
-	SystemID      uint8   `json:"system_id"`
-	ComponentID   uint8   `json:"component_id"`
-	TimestampUS   uint64  `json:"timestamp_us,omitempty"`
-	RSSI          *uint8  `json:"rssi,omitempty"`
-	RemoteRSSI    *uint8  `json:"remote_rssi,omitempty"`
-	TxBufferPct   uint8   `json:"tx_buffer_pct"`
-	Noise         *uint8  `json:"noise,omitempty"`
-	RemoteNoise   *uint8  `json:"remote_noise,omitempty"`
-	RxErrors      uint16  `json:"rx_errors"`
-	FixedPackets  uint16  `json:"fixed_packets"`
+	SystemID     uint8  `json:"system_id"`
+	ComponentID  uint8  `json:"component_id"`
+	TimestampUS  uint64 `json:"timestamp_us,omitempty"`
+	RSSI         *uint8 `json:"rssi,omitempty"`
+	RemoteRSSI   *uint8 `json:"remote_rssi,omitempty"`
+	TxBufferPct  uint8  `json:"tx_buffer_pct"`
+	Noise        *uint8 `json:"noise,omitempty"`
+	RemoteNoise  *uint8 `json:"remote_noise,omitempty"`
+	RxErrors     uint16 `json:"rx_errors"`
+	FixedPackets uint16 `json:"fixed_packets"`
 }
 
 func inspectRadioStatus(data []byte) ([]RadioSample, error) {
