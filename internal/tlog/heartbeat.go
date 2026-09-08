@@ -26,6 +26,7 @@ type EndpointRole struct {
 type DetailedSummary struct {
 	Summary
 	EndpointRoles []EndpointRole `json:"endpoint_roles,omitempty"`
+	Radio         []RadioSample  `json:"radio,omitempty"`
 }
 
 func InspectDetailed(r io.Reader) (DetailedSummary, error) {
@@ -41,7 +42,11 @@ func InspectDetailed(r io.Reader) (DetailedSummary, error) {
 	if err != nil {
 		return DetailedSummary{}, err
 	}
-	return DetailedSummary{Summary: summary, EndpointRoles: roles}, nil
+	radio, err := inspectRadioStatus(data)
+	if err != nil {
+		return DetailedSummary{}, err
+	}
+	return DetailedSummary{Summary: summary, EndpointRoles: roles, Radio: radio}, nil
 }
 
 func inspectEndpointRoles(data []byte) ([]EndpointRole, error) {
