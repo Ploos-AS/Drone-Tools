@@ -12,8 +12,11 @@ func TestEvaluateHealthyFlight(t *testing.T) {
 	if result.Score != 100 || result.Status != "good" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if result.Algorithm != "m3.4-deterministic-v3" {
+	if result.Algorithm != "m3.12-deterministic-v4" {
 		t.Fatalf("algorithm = %q", result.Algorithm)
+	}
+	if result.Link.Available || result.Link.Status != "unavailable" || result.Link.Score != nil {
+		t.Fatalf("unexpected missing link component: %+v", result.Link)
 	}
 }
 
@@ -82,6 +85,9 @@ func TestEvaluateMissingTelemetryIsExplicit(t *testing.T) {
 	if len(result.Findings) != 3 {
 		t.Fatalf("findings = %+v", result.Findings)
 	}
+	if result.Link.Status != "unavailable" {
+		t.Fatalf("link status = %q, want unavailable", result.Link.Status)
+	}
 }
 
 func TestEvaluateDataQualityPenalties(t *testing.T) {
@@ -92,5 +98,47 @@ func TestEvaluateDataQualityPenalties(t *testing.T) {
 	})
 	if result.Data.Score != 25 || result.Data.Status != "poor" {
 		t.Fatalf("unexpected data component: %+v", result.Data)
+	}
+}
+
+func TestEvaluateLinkHealthOverlay(t *testing.T) {
+	result := Evaluate(Input{
+		GPS:     GPSInput{Samples: 100},
+		Battery: BatteryInput{Samples: 20},
+		Data:    DataInput{TrackSamples: 100, TimedSamples: 100},
+		Link:    LinkInput{Samples: 10, LowTxBufferSamples: 6, RxErrorIncreaseEvents: 4},
+	})
+	if !result.Link.Available || result.Link.Score == nil {
+		t.Fatalf("expected available link component: %+v", result.Link)
+	}
+	if *result.Link.Score != 20 || result.Link.Status != "poor" {
+		t.Fatalf("unexpected link component: %+v", result.Link)
+	}
+	if result.Score != 88 {
+		t.Fatalf("score = %d, want 88", result.Score)
+	}
+	if len(result.Link.Findings) != 2 {
+		t.Fatalf("link findings = %+v", result.Link.Findings)
+	}
+}
+
+func TestEvaluateLinkMissingDoesNotChangeBaselineScore(t *testing.T) {
+	start, end := 0.50, 0.08
+	withoutLink := Evaluate(Input{
+		GPS:     GPSInput{Samples: 10},
+		Battery: BatteryInput{Samples: 10, StartRemaining: &start, EndRemaining: &end},
+		Data:    DataInput{TrackSamples: 10, TimedSamples: 10},
+	})
+	withHealthyLink := Evaluate(Input{
+		GPS:     GPSInput{Samples: 10},
+		Battery: BatteryInput{Samples: 10, StartRemaining: &start, EndRemaining: &end},
+		Data:    DataInput{TrackSamples: 10, TimedSamples: 10},
+		Link:    LinkInput{Samples: 10},
+	})
+	if withoutLink.Score != 91 {
+		t.Fatalf("baseline score = %d, want 91", withoutLink.Score)
+	}
+	if withHealthyLink.Score != 92 {
+		t.Fatalf("healthy-link score = %d, want 92", withHealthyLink.Score)
 	}
 }
