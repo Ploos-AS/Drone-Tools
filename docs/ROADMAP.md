@@ -36,13 +36,26 @@ Qualification: `docs/M2_QUALIFICATION.md`.
 - charts
 - flight summary
 
-## M3 - Flight health
+## M3 - Flight health — hardening through M3.11 qualified
 
-- GPS quality
-- battery health indicators
+Qualification: `docs/M3_5_TO_M3_11_QUALIFICATION.md`.
+
+Completed through M3.11:
+
+- GPS quality and precision metrics
+- deterministic Flight Health foundation
+- MAVLink CRC and parser correctness hardening
+- MAVLink2 truncated-payload handling
+- GPS sentinel/validity hardening
+- endpoint-aware TLOG telemetry, analysis and health
+- HEARTBEAT-based MAVLink endpoint-role awareness
+
+Remaining M3 scope:
+
+- battery health indicators beyond generic telemetry availability
 - radio/link indicators where available
 - vibration and sensor indicators
-- deterministic anomaly rules
+- deterministic anomaly rules beyond the current GPS/data/battery model
 - flight-to-flight comparison
 
 ## M4 - Local logbook
