@@ -23,7 +23,15 @@ const (
 var (
 	ErrInvalidLog = errors.New("invalid MAVLink TLOG")
 	ErrTruncated  = errors.New("truncated MAVLink TLOG record")
+	ErrChecksum   = errors.New("invalid MAVLink checksum")
 )
+
+var coreCRCExtra = map[uint32]byte{
+	msgSysStatus:         124,
+	msgGPSRawInt:         24,
+	msgGlobalPositionInt: 104,
+	msgBatteryStatus:     154,
+}
 
 type Endpoint struct {
 	SystemID    uint8 `json:"system_id"`
@@ -57,16 +65,17 @@ type Telemetry struct {
 }
 
 type Summary struct {
-	Format           string         `json:"format"`
-	Records          int            `json:"records"`
-	MAVLink1Records  int            `json:"mavlink1_records"`
-	MAVLink2Records  int            `json:"mavlink2_records"`
-	SignedRecords    int            `json:"signed_records"`
-	StartTimestampUS uint64         `json:"start_timestamp_us,omitempty"`
-	EndTimestampUS   uint64         `json:"end_timestamp_us,omitempty"`
-	MessageIDs       map[uint32]int `json:"message_ids"`
-	Endpoints        []Endpoint     `json:"endpoints,omitempty"`
-	Telemetry        Telemetry      `json:"telemetry"`
+	Format                   string         `json:"format"`
+	Records                  int            `json:"records"`
+	MAVLink1Records          int            `json:"mavlink1_records"`
+	MAVLink2Records          int            `json:"mavlink2_records"`
+	SignedRecords            int            `json:"signed_records"`
+	ChecksumValidatedRecords int            `json:"checksum_validated_records"`
+	StartTimestampUS         uint64         `json:"start_timestamp_us,omitempty"`
+	EndTimestampUS           uint64         `json:"end_timestamp_us,omitempty"`
+	MessageIDs               map[uint32]int `json:"message_ids"`
+	Endpoints                []Endpoint     `json:"endpoints,omitempty"`
+	Telemetry                Telemetry      `json:"telemetry"`
 }
 
 func Inspect(r io.Reader) (Summary, error) {
@@ -96,6 +105,12 @@ func Inspect(r io.Reader) (Summary, error) {
 			return Summary{}, ErrTruncated
 		}
 		frame := data[offset : offset+frameLength]
+		if extra, ok := coreCRCExtra[msgID]; ok {
+			if !validFrameChecksum(frame, version, extra) {
+				return Summary{}, fmt.Errorf("%w: message %d", ErrChecksum, msgID)
+			}
+			s.ChecksumValidatedRecords++
+		}
 
 		s.Records++
 		if s.Records == 1 {
@@ -130,6 +145,33 @@ func Inspect(r io.Reader) (Summary, error) {
 		return s.Endpoints[i].SystemID < s.Endpoints[j].SystemID
 	})
 	return s, nil
+}
+
+func validFrameChecksum(frame []byte, version int, extra byte) bool {
+	if len(frame) < 8 {
+		return false
+	}
+	payloadLength := int(frame[1])
+	headerLength := 6
+	if version == 2 {
+		headerLength = 10
+	}
+	checksumOffset := headerLength + payloadLength
+	if checksumOffset+2 > len(frame) {
+		return false
+	}
+	crc := uint16(0xffff)
+	for _, b := range frame[1:checksumOffset] {
+		crc = x25Accumulate(crc, b)
+	}
+	crc = x25Accumulate(crc, extra)
+	return binary.LittleEndian.Uint16(frame[checksumOffset:checksumOffset+2]) == crc
+}
+
+func x25Accumulate(crc uint16, b byte) uint16 {
+	tmp := b ^ byte(crc&0xff)
+	tmp ^= tmp << 4
+	return (crc >> 8) ^ (uint16(tmp) << 8) ^ (uint16(tmp) << 3) ^ (uint16(tmp) >> 4)
 }
 
 func framePayload(frame []byte, version int) []byte {
