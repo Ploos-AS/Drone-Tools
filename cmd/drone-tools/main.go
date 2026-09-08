@@ -63,7 +63,7 @@ func main() {
 	}
 
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	log.Printf("Drone-Tools M3.1 listening on %s", addr)
+	log.Printf("Drone-Tools M3.4 listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(fmt.Errorf("server: %w", err))
 	}
@@ -85,7 +85,7 @@ func newHandler(dataDir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "Drone-Tools", "data_dir": filepath.Clean(dataDir),
-			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M3.1",
+			"timestamp": time.Now().UTC().Format(time.RFC3339), "stage": "M3.4",
 		})
 	})
 	mux.HandleFunc("/api/v1/inspect", inspectHandler)
