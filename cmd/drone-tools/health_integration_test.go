@@ -84,6 +84,34 @@ func TestTLOGHealthUsesSelectedTrackEndpoint(t *testing.T) {
 	}
 }
 
+func TestTLOGHealthPrefersHeartbeatFlightController(t *testing.T) {
+	telemetry := tlog.Telemetry{
+		GPS: []tlog.GPSSample{
+			{Source: "GLOBAL_POSITION_INT", SystemID: 1, ComponentID: 1, TimestampUS: 1, Latitude: 58.0, Longitude: 7.0},
+			{Source: "GPS_RAW_INT", SystemID: 1, ComponentID: 1, TimestampUS: 1, Latitude: 58.0, Longitude: 7.0, FixType: 3, Satellites: 12},
+			{Source: "GLOBAL_POSITION_INT", SystemID: 2, ComponentID: 191, TimestampUS: 1, Latitude: 60.0, Longitude: 8.0},
+			{Source: "GLOBAL_POSITION_INT", SystemID: 2, ComponentID: 191, TimestampUS: 2, Latitude: 60.1, Longitude: 8.1},
+			{Source: "GLOBAL_POSITION_INT", SystemID: 2, ComponentID: 191, TimestampUS: 3, Latitude: 60.2, Longitude: 8.2},
+			{Source: "GPS_RAW_INT", SystemID: 2, ComponentID: 191, TimestampUS: 1, Latitude: 60.0, Longitude: 8.0, FixType: 1, Satellites: 2},
+		},
+		Battery: []tlog.BatterySample{
+			{Source: "BATTERY_STATUS", SystemID: 1, ComponentID: 1, TimestampUS: 2, VoltageV: 15.2, Remaining: 0.8},
+			{Source: "BATTERY_STATUS", SystemID: 2, ComponentID: 191, TimestampUS: 3, VoltageV: 9.0, Remaining: 0.1},
+		},
+	}
+	roles := []tlog.EndpointRole{
+		{SystemID: 1, ComponentID: 1, Role: "flight-controller"},
+		{SystemID: 2, ComponentID: 191, Role: "onboard-controller"},
+	}
+	input := healthInputFromTLOGWithRoles(telemetry, roles)
+	if input.Data.TrackSamples != 1 || input.GPS.LowFixSamples != 0 || input.GPS.LowSatelliteSamples != 0 {
+		t.Fatalf("role-aware health selected wrong endpoint: %+v", input)
+	}
+	if input.Battery.Samples != 1 || input.Battery.MinVoltageV == nil || *input.Battery.MinVoltageV != 15.2 {
+		t.Fatalf("role-aware battery selected wrong endpoint: %+v", input.Battery)
+	}
+}
+
 func TestZeroCoordinateIsInvalidTrackData(t *testing.T) {
 	var data health.DataInput
 	accumulateTrackQuality(&data, 1, 0, 0, 0)
