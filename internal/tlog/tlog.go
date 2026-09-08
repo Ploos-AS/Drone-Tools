@@ -41,6 +41,8 @@ type Endpoint struct {
 
 type GPSSample struct {
 	Source         string   `json:"source"`
+	SystemID       uint8    `json:"system_id,omitempty"`
+	ComponentID    uint8    `json:"component_id,omitempty"`
 	TimestampUS    uint64   `json:"timestamp_us,omitempty"`
 	Latitude       float64  `json:"latitude"`
 	Longitude      float64  `json:"longitude"`
@@ -54,6 +56,8 @@ type GPSSample struct {
 
 type BatterySample struct {
 	Source      string  `json:"source"`
+	SystemID    uint8   `json:"system_id,omitempty"`
+	ComponentID uint8   `json:"component_id,omitempty"`
 	TimestampUS uint64  `json:"timestamp_us,omitempty"`
 	VoltageV    float64 `json:"voltage_v,omitempty"`
 	CurrentA    float64 `json:"current_a,omitempty"`
@@ -141,7 +145,7 @@ func Inspect(r io.Reader) (Summary, error) {
 		s.MessageIDs[msgID]++
 		key := uint16(sysID)<<8 | uint16(compID)
 		endpoints[key] = Endpoint{SystemID: sysID, ComponentID: compID}
-		decodeCoreTelemetry(&s.Telemetry, msgID, timestamp, version, framePayload(frame, version))
+		decodeCoreTelemetryForEndpoint(&s.Telemetry, msgID, timestamp, version, sysID, compID, framePayload(frame, version))
 		offset = frameStart + frameLength
 	}
 
@@ -233,6 +237,10 @@ func decodePayload(payload []byte, version, required, paddedLength int) ([]byte,
 }
 
 func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64, version int, payload []byte) {
+	decodeCoreTelemetryForEndpoint(out, msgID, recordTimestampUS, version, 0, 0, payload)
+}
+
+func decodeCoreTelemetryForEndpoint(out *Telemetry, msgID uint32, recordTimestampUS uint64, version int, sysID, compID uint8, payload []byte) {
 	switch msgID {
 	case msgGPSRawInt:
 		payload, ok := decodePayload(payload, version, 27, 30)
@@ -250,6 +258,8 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		}
 		sample := GPSSample{
 			Source:         "GPS_RAW_INT",
+			SystemID:       sysID,
+			ComponentID:    compID,
 			TimestampUS:    timestamp,
 			Latitude:       lat,
 			Longitude:      lon,
@@ -281,6 +291,8 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		vy := float64(int16(binary.LittleEndian.Uint16(payload[22:24]))) / 100
 		out.GPS = append(out.GPS, GPSSample{
 			Source:         "GLOBAL_POSITION_INT",
+			SystemID:       sysID,
+			ComponentID:    compID,
 			TimestampUS:    recordTimestampUS,
 			Latitude:       lat,
 			Longitude:      lon,
@@ -295,7 +307,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		voltageMV := binary.LittleEndian.Uint16(payload[14:16])
 		currentCA := int16(binary.LittleEndian.Uint16(payload[16:18]))
 		remainingPct := int8(payload[18])
-		sample := BatterySample{Source: "SYS_STATUS", TimestampUS: recordTimestampUS}
+		sample := BatterySample{Source: "SYS_STATUS", SystemID: sysID, ComponentID: compID, TimestampUS: recordTimestampUS}
 		var have bool
 		if voltageMV != 0xffff {
 			sample.VoltageV = float64(voltageMV) / 1000
@@ -317,7 +329,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		if !ok {
 			return
 		}
-		sample := BatterySample{Source: "BATTERY_STATUS", TimestampUS: recordTimestampUS}
+		sample := BatterySample{Source: "BATTERY_STATUS", SystemID: sysID, ComponentID: compID, TimestampUS: recordTimestampUS}
 		var voltageMV uint64
 		for i := 0; i < 10; i++ {
 			cell := binary.LittleEndian.Uint16(payload[10+i*2 : 12+i*2])
