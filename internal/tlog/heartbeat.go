@@ -2,18 +2,17 @@ package tlog
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"sort"
 )
 
 const (
-	msgHeartbeat         = 0
-	heartbeatCRCExtra    = 50
-	mavAutopilotInvalid  = 8
-	mavTypeGCS           = 6
-	mavTypeOnboard       = 18
+	msgHeartbeat        = 0
+	heartbeatCRCExtra   = 50
+	mavAutopilotInvalid = 8
+	mavTypeGCS          = 6
+	mavTypeOnboard      = 18
 )
 
 type EndpointRole struct {
@@ -105,11 +104,4 @@ func IsFlightController(roles []EndpointRole, systemID, componentID uint8) bool 
 		}
 	}
 	return false
-}
-
-func heartbeatTestTimestamp(data []byte) uint64 {
-	if len(data) < 8 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(data[:8])
 }
