@@ -198,9 +198,7 @@ func healthInputFromTLOGWithRoles(telemetry tlog.Telemetry, roles []tlog.Endpoin
 
 	battery := telemetry.Battery
 	if haveEndpoint {
-		if matching := filterTLOGBatteryByEndpoint(telemetry.Battery, endpoint); len(matching) > 0 {
-			battery = matching
-		}
+		battery = filterTLOGBatteryBySystem(telemetry.Battery, endpoint.systemID)
 	}
 	accumulateTLOGBattery(&in.Battery, battery)
 	return in
@@ -223,10 +221,10 @@ func filterTLOGGPSByEndpoint(samples []tlog.GPSSample, endpoint tlogEndpointKey)
 	return filtered
 }
 
-func filterTLOGBatteryByEndpoint(samples []tlog.BatterySample, endpoint tlogEndpointKey) []tlog.BatterySample {
+func filterTLOGBatteryBySystem(samples []tlog.BatterySample, systemID uint8) []tlog.BatterySample {
 	filtered := make([]tlog.BatterySample, 0, len(samples))
 	for _, sample := range samples {
-		if sample.SystemID == endpoint.systemID && sample.ComponentID == endpoint.componentID {
+		if sample.SystemID == systemID {
 			filtered = append(filtered, sample)
 		}
 	}
