@@ -26,7 +26,7 @@ func tlogInspectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	summary, err := tlog.Inspect(file)
+	summary, err := tlog.InspectDetailed(file)
 	if err != nil {
 		http.Error(w, "invalid MAVLink TLOG file", http.StatusBadRequest)
 		return
@@ -36,11 +36,11 @@ func tlogInspectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseTLOGMap(file interface{ Read([]byte) (int, error) }) (mapdata.Document, error) {
-	summary, err := tlog.Inspect(file)
+	summary, err := tlog.InspectDetailed(file)
 	if err != nil {
 		return mapdata.Document{}, err
 	}
-	return tlogMap(summary.Telemetry.GPS)
+	return tlogMapWithRoles(summary.Telemetry.GPS, summary.EndpointRoles)
 }
 
 type tlogEndpointKey struct {
@@ -49,6 +49,10 @@ type tlogEndpointKey struct {
 }
 
 func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
+	return tlogTrackSamplesWithRoles(samples, nil)
+}
+
+func tlogTrackSamplesWithRoles(samples []tlog.GPSSample, roles []tlog.EndpointRole) []tlog.GPSSample {
 	preferred := make([]tlog.GPSSample, 0, len(samples))
 	fallback := make([]tlog.GPSSample, 0, len(samples))
 	for _, sample := range samples {
@@ -66,7 +70,7 @@ func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 	if len(candidates) == 0 {
 		candidates = fallback
 	}
-	selected := selectTLOGTrackEndpoint(candidates)
+	selected := selectTLOGTrackEndpointWithRoles(candidates, roles)
 	sort.SliceStable(selected, func(i, j int) bool {
 		return selected[i].TimestampUS < selected[j].TimestampUS
 	})
@@ -74,9 +78,23 @@ func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 }
 
 func selectTLOGTrackEndpoint(samples []tlog.GPSSample) []tlog.GPSSample {
+	return selectTLOGTrackEndpointWithRoles(samples, nil)
+}
+
+func selectTLOGTrackEndpointWithRoles(samples []tlog.GPSSample, roles []tlog.EndpointRole) []tlog.GPSSample {
 	if len(samples) == 0 {
 		return nil
 	}
+	rolePreferred := make([]tlog.GPSSample, 0, len(samples))
+	for _, sample := range samples {
+		if tlog.IsFlightController(roles, sample.SystemID, sample.ComponentID) {
+			rolePreferred = append(rolePreferred, sample)
+		}
+	}
+	if len(rolePreferred) > 0 {
+		samples = rolePreferred
+	}
+
 	counts := make(map[tlogEndpointKey]int)
 	for _, sample := range samples {
 		counts[tlogEndpointKey{systemID: sample.SystemID, componentID: sample.ComponentID}]++
@@ -117,7 +135,11 @@ func knownTLOGSpeed(sample tlog.GPSSample) bool {
 }
 
 func tlogMap(samples []tlog.GPSSample) (mapdata.Document, error) {
-	track := tlogTrackSamples(samples)
+	return tlogMapWithRoles(samples, nil)
+}
+
+func tlogMapWithRoles(samples []tlog.GPSSample, roles []tlog.EndpointRole) (mapdata.Document, error) {
+	track := tlogTrackSamplesWithRoles(samples, roles)
 	if len(track) == 0 {
 		return mapdata.Document{}, errors.New("TLOG contains no valid GPS samples")
 	}
@@ -129,15 +151,19 @@ func tlogMap(samples []tlog.GPSSample) (mapdata.Document, error) {
 }
 
 func parseTLOGAnalysis(file interface{ Read([]byte) (int, error) }) (flightAnalysis, error) {
-	summary, err := tlog.Inspect(file)
+	summary, err := tlog.InspectDetailed(file)
 	if err != nil {
 		return flightAnalysis{}, err
 	}
-	return analyzeTLOG(summary.Telemetry), nil
+	return analyzeTLOGWithRoles(summary.Telemetry, summary.EndpointRoles), nil
 }
 
 func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
-	track := tlogTrackSamples(telemetry.GPS)
+	return analyzeTLOGWithRoles(telemetry, nil)
+}
+
+func analyzeTLOGWithRoles(telemetry tlog.Telemetry, roles []tlog.EndpointRole) flightAnalysis {
+	track := tlogTrackSamplesWithRoles(telemetry.GPS, roles)
 	a := flightAnalysis{Quality: "good", TrackPoints: len(track), TimedPoints: len(track), ElevationPoints: len(track)}
 	if len(track) == 0 {
 		a.Quality = "limited"
