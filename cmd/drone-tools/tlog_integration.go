@@ -145,6 +145,9 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 		return a
 	}
 
+	endpoint, _ := tlogTrackEndpoint(track)
+	gps := filterTLOGGPSByEndpoint(telemetry.GPS, endpoint)
+
 	minElevation := track[0].AltitudeMeters
 	maxElevation := minElevation
 	var maxSpeed float64
@@ -177,14 +180,14 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 	}
 	setTimedAnalysis(&a, track[0].TimestampUS, track[len(track)-1].TimestampUS)
 
-	for _, sample := range telemetry.GPS {
+	for _, sample := range gps {
 		if sample.Source == "GPS_RAW_INT" && sample.FixType < 3 {
 			a.Quality = "limited"
 			a.Warnings = append(a.Warnings, "MAVLink GPS samples include fix type below 3D")
 			break
 		}
 	}
-	for _, sample := range telemetry.GPS {
+	for _, sample := range gps {
 		if sample.Source == "GPS_RAW_INT" && sample.Satellites != 0xff && sample.Satellites < 6 {
 			a.Quality = "limited"
 			a.Warnings = append(a.Warnings, "MAVLink GPS samples include fewer than 6 satellites")
@@ -192,7 +195,7 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 		}
 	}
 
-	if latest, ok := preferredTLOGBattery(telemetry.Battery); ok {
+	if latest, ok := preferredTLOGBatteryForEndpoint(telemetry.Battery, endpoint); ok {
 		a.BatteryVoltageV = pointer(latest.VoltageV)
 		a.BatteryCurrentA = pointer(latest.CurrentA)
 		a.BatteryRemaining = pointer(latest.Remaining)
@@ -200,6 +203,14 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 		a.Warnings = append(a.Warnings, "no SYS_STATUS/BATTERY_STATUS samples")
 	}
 	return a
+}
+
+func preferredTLOGBatteryForEndpoint(samples []tlog.BatterySample, endpoint tlogEndpointKey) (tlog.BatterySample, bool) {
+	matching := filterTLOGBatteryByEndpoint(samples, endpoint)
+	if len(matching) > 0 {
+		return preferredTLOGBattery(matching)
+	}
+	return preferredTLOGBattery(samples)
 }
 
 func preferredTLOGBattery(samples []tlog.BatterySample) (tlog.BatterySample, bool) {
