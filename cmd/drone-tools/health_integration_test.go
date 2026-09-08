@@ -51,6 +51,23 @@ func TestPrecisionThresholdsAreFormatSpecific(t *testing.T) {
 	}
 }
 
+func TestTLOGUnknownSatellitesAreNotScored(t *testing.T) {
+	input := healthInputFromTLOG(tlog.Telemetry{GPS: []tlog.GPSSample{{
+		Source: "GPS_RAW_INT", TimestampUS: 1, Latitude: 58, Longitude: 7, FixType: 3, Satellites: 0xff,
+	}}})
+	if input.GPS.SatelliteQualitySamples != 0 || input.GPS.LowSatelliteSamples != 0 {
+		t.Fatalf("unexpected satellite quality input: %+v", input.GPS)
+	}
+}
+
+func TestZeroCoordinateIsInvalidTrackData(t *testing.T) {
+	var data health.DataInput
+	accumulateTrackQuality(&data, 1, 0, 0, 0)
+	if data.InvalidCoordinates != 1 {
+		t.Fatalf("invalid coordinates = %d, want 1", data.InvalidCoordinates)
+	}
+}
+
 func TestAccumulateGPSGaps(t *testing.T) {
 	var gps health.GPSInput
 	accumulateGPSGaps(&gps, []uint64{1_000_000, 2_000_000, 3_000_000, 20_000_000, 21_000_000})
