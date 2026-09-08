@@ -60,6 +60,30 @@ func TestTLOGUnknownSatellitesAreNotScored(t *testing.T) {
 	}
 }
 
+func TestTLOGHealthUsesSelectedTrackEndpoint(t *testing.T) {
+	telemetry := tlog.Telemetry{
+		GPS: []tlog.GPSSample{
+			{Source: "GPS_RAW_INT", SystemID: 1, ComponentID: 1, TimestampUS: 1, Latitude: 58.0, Longitude: 7.0, FixType: 3, Satellites: 12},
+			{Source: "GPS_RAW_INT", SystemID: 2, ComponentID: 1, TimestampUS: 2, Latitude: 60.0, Longitude: 8.0, FixType: 1, Satellites: 2},
+			{Source: "GPS_RAW_INT", SystemID: 1, ComponentID: 1, TimestampUS: 3, Latitude: 58.1, Longitude: 7.1, FixType: 3, Satellites: 11},
+		},
+		Battery: []tlog.BatterySample{
+			{Source: "BATTERY_STATUS", SystemID: 1, ComponentID: 1, TimestampUS: 3, VoltageV: 15.2, Remaining: 0.8},
+			{Source: "BATTERY_STATUS", SystemID: 2, ComponentID: 1, TimestampUS: 4, VoltageV: 9.0, Remaining: 0.1},
+		},
+	}
+	input := healthInputFromTLOG(telemetry)
+	if input.GPS.Samples != 2 || input.GPS.LowFixSamples != 0 || input.GPS.LowSatelliteSamples != 0 {
+		t.Fatalf("foreign endpoint contaminated GPS health: %+v", input.GPS)
+	}
+	if input.Data.TrackSamples != 2 {
+		t.Fatalf("track samples = %d, want 2", input.Data.TrackSamples)
+	}
+	if input.Battery.Samples != 1 || input.Battery.MinVoltageV == nil || *input.Battery.MinVoltageV != 15.2 {
+		t.Fatalf("foreign endpoint contaminated battery health: %+v", input.Battery)
+	}
+}
+
 func TestZeroCoordinateIsInvalidTrackData(t *testing.T) {
 	var data health.DataInput
 	accumulateTrackQuality(&data, 1, 0, 0, 0)
