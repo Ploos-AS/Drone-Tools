@@ -18,7 +18,7 @@ func TestDecodeGPSRawPrecision(t *testing.T) {
 	payload[29] = 12
 
 	var telemetry Telemetry
-	decodeCoreTelemetry(&telemetry, msgGPSRawInt, 1_000_000, payload)
+	decodeCoreTelemetry(&telemetry, msgGPSRawInt, 1_000_000, 2, payload)
 	if len(telemetry.GPS) != 1 {
 		t.Fatalf("GPS samples = %d, want 1", len(telemetry.GPS))
 	}
@@ -40,7 +40,7 @@ func TestDecodeGPSRawUnknownPrecision(t *testing.T) {
 	binary.LittleEndian.PutUint16(payload[23:25], 0xffff)
 
 	var telemetry Telemetry
-	decodeCoreTelemetry(&telemetry, msgGPSRawInt, 1_000_000, payload)
+	decodeCoreTelemetry(&telemetry, msgGPSRawInt, 1_000_000, 2, payload)
 	if len(telemetry.GPS) != 1 {
 		t.Fatalf("GPS samples = %d, want 1", len(telemetry.GPS))
 	}
