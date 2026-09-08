@@ -43,6 +43,11 @@ func parseTLOGMap(file interface{ Read([]byte) (int, error) }) (mapdata.Document
 	return tlogMap(summary.Telemetry.GPS)
 }
 
+type tlogEndpointKey struct {
+	systemID    uint8
+	componentID uint8
+}
+
 func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 	preferred := make([]tlog.GPSSample, 0, len(samples))
 	fallback := make([]tlog.GPSSample, 0, len(samples))
@@ -57,14 +62,47 @@ func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 			fallback = append(fallback, sample)
 		}
 	}
-	selected := preferred
-	if len(selected) == 0 {
-		selected = fallback
+	candidates := preferred
+	if len(candidates) == 0 {
+		candidates = fallback
 	}
+	selected := selectTLOGTrackEndpoint(candidates)
 	sort.SliceStable(selected, func(i, j int) bool {
 		return selected[i].TimestampUS < selected[j].TimestampUS
 	})
 	return selected
+}
+
+func selectTLOGTrackEndpoint(samples []tlog.GPSSample) []tlog.GPSSample {
+	if len(samples) == 0 {
+		return nil
+	}
+	counts := make(map[tlogEndpointKey]int)
+	for _, sample := range samples {
+		counts[tlogEndpointKey{systemID: sample.SystemID, componentID: sample.ComponentID}]++
+	}
+	var best tlogEndpointKey
+	bestCount := -1
+	for key, count := range counts {
+		if count > bestCount || count == bestCount && endpointKeyLess(key, best) {
+			best = key
+			bestCount = count
+		}
+	}
+	selected := make([]tlog.GPSSample, 0, bestCount)
+	for _, sample := range samples {
+		if sample.SystemID == best.systemID && sample.ComponentID == best.componentID {
+			selected = append(selected, sample)
+		}
+	}
+	return selected
+}
+
+func endpointKeyLess(a, b tlogEndpointKey) bool {
+	if a.systemID == b.systemID {
+		return a.componentID < b.componentID
+	}
+	return a.systemID < b.systemID
 }
 
 func usableTLOGCoordinate(lat, lon float64) bool {
