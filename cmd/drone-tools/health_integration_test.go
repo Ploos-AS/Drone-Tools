@@ -147,7 +147,7 @@ func assertFlightHealth(t *testing.T, filename, fixture string) {
 	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Algorithm != "m3.4-deterministic-v3" {
+	if result.Algorithm != "m3.12-deterministic-v4" {
 		t.Fatalf("algorithm = %q", result.Algorithm)
 	}
 	if result.Score != 100 || result.Status != "good" {
