@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/Ploos-AS/Drone-Tools/internal/health"
 	"github.com/Ploos-AS/Drone-Tools/internal/tlog"
 )
 
@@ -14,14 +15,12 @@ func TestAccumulateTLOGLinkTracksLowBufferAndErrorIncreases(t *testing.T) {
 		{SystemID: 2, ComponentID: 68, TxBufferPct: 90, RxErrors: 100},
 		{SystemID: 2, ComponentID: 68, TxBufferPct: 90, RxErrors: 101},
 	}
-	var input healthLinkInputAlias
-	accumulateTLOGLink((*health.LinkInput)(&input), samples)
+	var input health.LinkInput
+	accumulateTLOGLink(&input, samples)
 	if input.Samples != 5 || input.LowTxBufferSamples != 2 || input.RxErrorIncreaseEvents != 2 {
 		t.Fatalf("unexpected link input: %+v", input)
 	}
 }
-
-type healthLinkInputAlias = health.LinkInput
 
 func TestHealthInputFromTLOGDetailedIncludesRadio(t *testing.T) {
 	summary := tlog.DetailedSummary{
