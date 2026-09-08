@@ -42,3 +42,54 @@ func TestHealthInputFromTLOGDetailedIncludesRadio(t *testing.T) {
 		t.Fatalf("unexpected link input: %+v", input.Link)
 	}
 }
+
+func TestHealthInputFromTLOGDetailedIgnoresForeignSystemRadio(t *testing.T) {
+	summary := tlog.DetailedSummary{
+		Summary: tlog.Summary{
+			Telemetry: tlog.Telemetry{
+				GPS: []tlog.GPSSample{
+					{Source: "GLOBAL_POSITION_INT", SystemID: 1, ComponentID: 1, TimestampUS: 1_000_000, Latitude: 58, Longitude: 7},
+					{Source: "GLOBAL_POSITION_INT", SystemID: 1, ComponentID: 1, TimestampUS: 2_000_000, Latitude: 58.001, Longitude: 7.001},
+					{Source: "GLOBAL_POSITION_INT", SystemID: 2, ComponentID: 1, TimestampUS: 1_000_000, Latitude: 60, Longitude: 8},
+				},
+			},
+		},
+		Radio: []tlog.RadioSample{
+			{SystemID: 1, ComponentID: 68, TxBufferPct: 80, RxErrors: 1},
+			{SystemID: 1, ComponentID: 69, TxBufferPct: 70, RxErrors: 4},
+			{SystemID: 2, ComponentID: 68, TxBufferPct: 5, RxErrors: 100},
+			{SystemID: 2, ComponentID: 68, TxBufferPct: 5, RxErrors: 101},
+		},
+	}
+
+	input := healthInputFromTLOGDetailed(summary)
+	if input.Link.Samples != 2 {
+		t.Fatalf("link samples = %d, want 2 from selected system", input.Link.Samples)
+	}
+	if input.Link.LowTxBufferSamples != 0 || input.Link.RxErrorIncreaseEvents != 0 {
+		t.Fatalf("foreign system contaminated link health: %+v", input.Link)
+	}
+}
+
+func TestHealthInputFromTLOGDetailedUsesAllRadioComponentsWithinSelectedSystem(t *testing.T) {
+	summary := tlog.DetailedSummary{
+		Summary: tlog.Summary{
+			Telemetry: tlog.Telemetry{
+				GPS: []tlog.GPSSample{
+					{Source: "GLOBAL_POSITION_INT", SystemID: 1, ComponentID: 1, TimestampUS: 1_000_000, Latitude: 58, Longitude: 7},
+					{Source: "GLOBAL_POSITION_INT", SystemID: 1, ComponentID: 1, TimestampUS: 2_000_000, Latitude: 58.001, Longitude: 7.001},
+				},
+			},
+		},
+		Radio: []tlog.RadioSample{
+			{SystemID: 1, ComponentID: 68, TxBufferPct: 80, RxErrors: 1},
+			{SystemID: 1, ComponentID: 69, TxBufferPct: 10, RxErrors: 5},
+			{SystemID: 1, ComponentID: 69, TxBufferPct: 10, RxErrors: 6},
+		},
+	}
+
+	input := healthInputFromTLOGDetailed(summary)
+	if input.Link.Samples != 3 || input.Link.LowTxBufferSamples != 2 || input.Link.RxErrorIncreaseEvents != 1 {
+		t.Fatalf("same-system radio components were not combined correctly: %+v", input.Link)
+	}
+}
