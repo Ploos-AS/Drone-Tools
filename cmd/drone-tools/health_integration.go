@@ -130,38 +130,91 @@ func healthInputFromDataFlash(telemetry dataflash.Telemetry) health.Input {
 
 func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 	in := health.Input{}
-	timestamps := make([]uint64, 0, len(telemetry.GPS))
-	for i, sample := range telemetry.GPS {
+	track := tlogTrackSamples(telemetry.GPS)
+	endpoint, haveEndpoint := tlogTrackEndpoint(track)
+
+	qualitySamples := telemetry.GPS
+	if haveEndpoint {
+		qualitySamples = filterTLOGGPSByEndpoint(telemetry.GPS, endpoint)
+	}
+
+	gapTimestamps := make([]uint64, 0, len(qualitySamples))
+	for _, sample := range qualitySamples {
 		in.GPS.Samples++
-		in.Data.TrackSamples++
-		if sample.Source == "GPS_RAW_INT" {
-			in.GPS.FixQualitySamples++
-			if sample.FixType < 3 {
-				in.GPS.LowFixSamples++
-			}
-			if sample.Satellites != 0xff {
-				in.GPS.SatelliteQualitySamples++
-				if sample.Satellites < 6 {
-					in.GPS.LowSatelliteSamples++
-				}
-			}
-			if sample.HDOP != nil || sample.VDOP != nil {
-				in.GPS.PrecisionQualitySamples++
-				poor := sample.HDOP != nil && *sample.HDOP > maxHDOP
-				poor = poor || sample.VDOP != nil && *sample.VDOP > maxVDOP
-				if poor {
-					in.GPS.PoorPrecisionSamples++
-				}
+		if sample.Source != "GPS_RAW_INT" {
+			continue
+		}
+		in.GPS.FixQualitySamples++
+		if sample.FixType < 3 {
+			in.GPS.LowFixSamples++
+		}
+		if sample.Satellites != 0xff {
+			in.GPS.SatelliteQualitySamples++
+			if sample.Satellites < 6 {
+				in.GPS.LowSatelliteSamples++
 			}
 		}
-		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousTLOGTimestamp(telemetry.GPS, i))
+		if sample.HDOP != nil || sample.VDOP != nil {
+			in.GPS.PrecisionQualitySamples++
+			poor := sample.HDOP != nil && *sample.HDOP > maxHDOP
+			poor = poor || sample.VDOP != nil && *sample.VDOP > maxVDOP
+			if poor {
+				in.GPS.PoorPrecisionSamples++
+			}
+		}
 		if sample.TimestampUS > 0 {
-			timestamps = append(timestamps, sample.TimestampUS)
+			gapTimestamps = append(gapTimestamps, sample.TimestampUS)
 		}
 	}
-	accumulateGPSGaps(&in.GPS, timestamps)
-	accumulateTLOGBattery(&in.Battery, telemetry.Battery)
+
+	for i, sample := range track {
+		in.Data.TrackSamples++
+		accumulateTrackQuality(&in.Data, sample.TimestampUS, sample.Latitude, sample.Longitude, previousTLOGTimestamp(track, i))
+	}
+	if len(gapTimestamps) == 0 {
+		for _, sample := range track {
+			if sample.TimestampUS > 0 {
+				gapTimestamps = append(gapTimestamps, sample.TimestampUS)
+			}
+		}
+	}
+	accumulateGPSGaps(&in.GPS, gapTimestamps)
+
+	battery := telemetry.Battery
+	if haveEndpoint {
+		if matching := filterTLOGBatteryByEndpoint(telemetry.Battery, endpoint); len(matching) > 0 {
+			battery = matching
+		}
+	}
+	accumulateTLOGBattery(&in.Battery, battery)
 	return in
+}
+
+func tlogTrackEndpoint(track []tlog.GPSSample) (tlogEndpointKey, bool) {
+	if len(track) == 0 {
+		return tlogEndpointKey{}, false
+	}
+	return tlogEndpointKey{systemID: track[0].SystemID, componentID: track[0].ComponentID}, true
+}
+
+func filterTLOGGPSByEndpoint(samples []tlog.GPSSample, endpoint tlogEndpointKey) []tlog.GPSSample {
+	filtered := make([]tlog.GPSSample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.SystemID == endpoint.systemID && sample.ComponentID == endpoint.componentID {
+			filtered = append(filtered, sample)
+		}
+	}
+	return filtered
+}
+
+func filterTLOGBatteryByEndpoint(samples []tlog.BatterySample, endpoint tlogEndpointKey) []tlog.BatterySample {
+	filtered := make([]tlog.BatterySample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.SystemID == endpoint.systemID && sample.ComponentID == endpoint.componentID {
+			filtered = append(filtered, sample)
+		}
+	}
+	return filtered
 }
 
 func accumulateGPSGaps(gps *health.GPSInput, timestamps []uint64) {
