@@ -217,14 +217,17 @@ func framePayload(frame []byte, version int) []byte {
 	return frame[start : start+payloadLength]
 }
 
-func decodePayload(payload []byte, version, minimum int) ([]byte, bool) {
-	if len(payload) >= minimum {
-		return payload, true
-	}
-	if version != 2 || len(payload) == 0 {
+func decodePayload(payload []byte, version, required, paddedLength int) ([]byte, bool) {
+	if len(payload) < required {
 		return nil, false
 	}
-	padded := make([]byte, minimum)
+	if len(payload) >= paddedLength {
+		return payload, true
+	}
+	if version != 2 {
+		return nil, false
+	}
+	padded := make([]byte, paddedLength)
 	copy(padded, payload)
 	return padded, true
 }
@@ -232,7 +235,7 @@ func decodePayload(payload []byte, version, minimum int) ([]byte, bool) {
 func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64, version int, payload []byte) {
 	switch msgID {
 	case msgGPSRawInt:
-		payload, ok := decodePayload(payload, version, 30)
+		payload, ok := decodePayload(payload, version, 27, 30)
 		if !ok {
 			return
 		}
@@ -265,7 +268,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 		}
 		out.GPS = append(out.GPS, sample)
 	case msgGlobalPositionInt:
-		payload, ok := decodePayload(payload, version, 28)
+		payload, ok := decodePayload(payload, version, 16, 28)
 		if !ok {
 			return
 		}
@@ -285,7 +288,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 			SpeedMPS:       math.Hypot(vx, vy),
 		})
 	case msgSysStatus:
-		payload, ok := decodePayload(payload, version, 19)
+		payload, ok := decodePayload(payload, version, 19, 19)
 		if !ok {
 			return
 		}
@@ -310,7 +313,7 @@ func decodeCoreTelemetry(out *Telemetry, msgID uint32, recordTimestampUS uint64,
 			out.Battery = append(out.Battery, sample)
 		}
 	case msgBatteryStatus:
-		payload, ok := decodePayload(payload, version, 36)
+		payload, ok := decodePayload(payload, version, 32, 36)
 		if !ok {
 			return
 		}
