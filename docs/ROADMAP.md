@@ -36,11 +36,11 @@ Qualification: `docs/M2_QUALIFICATION.md`.
 - charts
 - flight summary
 
-## M3 - Flight health — hardening through M3.12 qualified
+## M3 - Flight health — hardening through M3.13 qualified
 
-Qualifications: `docs/M3_5_TO_M3_11_QUALIFICATION.md` and `docs/M3_12_QUALIFICATION.md`.
+Qualifications: `docs/M3_5_TO_M3_11_QUALIFICATION.md`, `docs/M3_12_QUALIFICATION.md` and `docs/M3_13_QUALIFICATION.md`.
 
-Completed through M3.12:
+Completed through M3.13:
 
 - GPS quality and precision metrics
 - deterministic Flight Health foundation
@@ -50,11 +50,12 @@ Completed through M3.12:
 - endpoint-aware TLOG telemetry, analysis and health
 - HEARTBEAT-based MAVLink endpoint-role awareness
 - conservative MAVLink `RADIO_STATUS` Link Health with explicit unavailable semantics
+- vehicle-aware Link Health filtered by selected MAVLink `system_id`
 - Flight Health UI for GPS, battery, data and link components
 
 Remaining M3 scope:
 
-- vehicle-aware provenance for MAVLink link telemetry
+- vehicle/system-aware battery selection across MAVLink components
 - battery health indicators beyond generic telemetry availability
 - vibration and sensor indicators
 - deterministic anomaly rules beyond the current GPS/data/battery/link model
