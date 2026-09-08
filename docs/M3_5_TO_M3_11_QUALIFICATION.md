@@ -72,8 +72,11 @@ GitHub Actions CI run: **#131** (`34201053122`)
 - CRC validation is available for the supported core-message CRC extras; unknown dialect messages remain structural-only.
 - synthetic regression fixtures dominate this qualification; real-world TLOG fixture coverage should still be added.
 - Flight Health is a deterministic log-derived indicator, not a flight-worthiness, legal-flight, or safety certification.
-- `/api/v1/info` and the startup log still report `M3.4`. This is administrative stage metadata debt and does not change the qualified runtime behavior above; it should be reconciled in a dedicated metadata-only commit.
+
+## Administrative reconciliation
+
+The stage-metadata debt recorded when this qualification was written was resolved in M3.12: the startup log and `/api/v1/info` now report `M3.12`. This later metadata reconciliation does not alter the M3.5–M3.11 qualification baseline or its CI evidence.
 
 ## Verdict
 
-M3.5 through M3.11 runtime behavior is qualified on the final code baseline above. The remaining `M3.4` stage string is tracked as administrative metadata debt, not a functional qualification failure.
+M3.5 through M3.11 runtime behavior is qualified on the final code baseline above.
