@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"sort"
 
@@ -46,6 +47,9 @@ func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 	preferred := make([]tlog.GPSSample, 0, len(samples))
 	fallback := make([]tlog.GPSSample, 0, len(samples))
 	for _, sample := range samples {
+		if !usableTLOGCoordinate(sample.Latitude, sample.Longitude) {
+			continue
+		}
 		switch sample.Source {
 		case "GLOBAL_POSITION_INT":
 			preferred = append(preferred, sample)
@@ -63,16 +67,24 @@ func tlogTrackSamples(samples []tlog.GPSSample) []tlog.GPSSample {
 	return selected
 }
 
+func usableTLOGCoordinate(lat, lon float64) bool {
+	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return false
+	}
+	return lat != 0 || lon != 0
+}
+
+func knownTLOGSpeed(sample tlog.GPSSample) bool {
+	return sample.Source != "GPS_RAW_INT" || math.Abs(sample.SpeedMPS-655.35) > 1e-9
+}
+
 func tlogMap(samples []tlog.GPSSample) (mapdata.Document, error) {
 	track := tlogTrackSamples(samples)
 	if len(track) == 0 {
-		return mapdata.Document{}, errors.New("TLOG contains no GPS samples")
+		return mapdata.Document{}, errors.New("TLOG contains no valid GPS samples")
 	}
 	path := make([]mapdata.Coordinate, 0, len(track))
 	for _, sample := range track {
-		if sample.Latitude < -90 || sample.Latitude > 90 || sample.Longitude < -180 || sample.Longitude > 180 {
-			continue
-		}
 		path = append(path, mapdata.Coordinate{sample.Longitude, sample.Latitude})
 	}
 	return finishTelemetryMap("mavlink-tlog", path, "TLOG contains no valid GPS coordinates")
@@ -91,7 +103,7 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 	a := flightAnalysis{Quality: "good", TrackPoints: len(track), TimedPoints: len(track), ElevationPoints: len(track)}
 	if len(track) == 0 {
 		a.Quality = "limited"
-		a.Warnings = append(a.Warnings, "no GPS_RAW_INT/GLOBAL_POSITION_INT samples")
+		a.Warnings = append(a.Warnings, "no valid GPS_RAW_INT/GLOBAL_POSITION_INT samples")
 		return a
 	}
 
@@ -105,7 +117,7 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 		if sample.AltitudeMeters > maxElevation {
 			maxElevation = sample.AltitudeMeters
 		}
-		if sample.SpeedMPS > maxSpeed {
+		if knownTLOGSpeed(sample) && sample.SpeedMPS > maxSpeed {
 			maxSpeed = sample.SpeedMPS
 		}
 		if i == 0 {
@@ -135,7 +147,7 @@ func analyzeTLOG(telemetry tlog.Telemetry) flightAnalysis {
 		}
 	}
 	for _, sample := range telemetry.GPS {
-		if sample.Source == "GPS_RAW_INT" && sample.Satellites < 6 {
+		if sample.Source == "GPS_RAW_INT" && sample.Satellites != 0xff && sample.Satellites < 6 {
 			a.Quality = "limited"
 			a.Warnings = append(a.Warnings, "MAVLink GPS samples include fewer than 6 satellites")
 			break
