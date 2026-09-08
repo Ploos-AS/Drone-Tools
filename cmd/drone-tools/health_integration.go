@@ -136,12 +136,14 @@ func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 		in.Data.TrackSamples++
 		if sample.Source == "GPS_RAW_INT" {
 			in.GPS.FixQualitySamples++
-			in.GPS.SatelliteQualitySamples++
 			if sample.FixType < 3 {
 				in.GPS.LowFixSamples++
 			}
-			if sample.Satellites < 6 {
-				in.GPS.LowSatelliteSamples++
+			if sample.Satellites != 0xff {
+				in.GPS.SatelliteQualitySamples++
+				if sample.Satellites < 6 {
+					in.GPS.LowSatelliteSamples++
+				}
 			}
 			if sample.HDOP != nil || sample.VDOP != nil {
 				in.GPS.PrecisionQualitySamples++
@@ -202,7 +204,7 @@ func accumulateTrackQuality(data *health.DataInput, timestamp uint64, lat, lon f
 			data.NonMonotonicTimes++
 		}
 	}
-	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+	if lat < -90 || lat > 90 || lon < -180 || lon > 180 || (lat == 0 && lon == 0) {
 		data.InvalidCoordinates++
 	}
 }
