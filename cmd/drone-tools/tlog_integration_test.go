@@ -26,6 +26,9 @@ func TestTLOGTelemetryEndpoint(t *testing.T) {
 	if summary.Format != "mavlink-tlog" || len(summary.Telemetry.GPS) != 2 || len(summary.Telemetry.Battery) != 1 {
 		t.Fatalf("unexpected TLOG telemetry: %+v", summary)
 	}
+	if summary.ChecksumValidatedRecords != 3 {
+		t.Fatalf("checksum validated = %d, want 3", summary.ChecksumValidatedRecords)
+	}
 }
 
 func TestTLOGWorkspaceEndpoints(t *testing.T) {
@@ -112,7 +115,19 @@ func writeTLOGRecord(b *bytes.Buffer, timestamp uint64, frame []byte) {
 func mavlink1TestFrame(sysID, compID, msgID byte, payload []byte) []byte {
 	frame := []byte{0xFE, byte(len(payload)), 1, sysID, compID, msgID}
 	frame = append(frame, payload...)
-	return append(frame, 0, 0)
+	crcExtra := map[byte]byte{1: 124, 24: 24, 33: 104, 147: 154}[msgID]
+	crc := uint16(0xffff)
+	for _, b := range frame[1:] {
+		crc = testX25Accumulate(crc, b)
+	}
+	crc = testX25Accumulate(crc, crcExtra)
+	return append(frame, byte(crc), byte(crc>>8))
+}
+
+func testX25Accumulate(crc uint16, b byte) uint16 {
+	tmp := b ^ byte(crc&0xff)
+	tmp ^= tmp << 4
+	return (crc >> 8) ^ (uint16(tmp) << 8) ^ (uint16(tmp) << 3) ^ (uint16(tmp) >> 4)
 }
 
 func gpsRawPayload(timestamp uint64, lat, lon, alt int32, velocity uint16, fix, satellites byte) []byte {
