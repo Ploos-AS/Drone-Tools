@@ -21,6 +21,9 @@ func TestInspectMixedMAVLinkVersions(t *testing.T) {
 	if s.Format != "mavlink-tlog" || s.Records != 3 || s.MAVLink1Records != 1 || s.MAVLink2Records != 2 || s.SignedRecords != 1 {
 		t.Fatalf("unexpected summary: %+v", s)
 	}
+	if s.UnverifiedSignatureRecords != 1 {
+		t.Fatalf("unverified signatures = %d, want 1", s.UnverifiedSignatureRecords)
+	}
 	if s.ChecksumValidatedRecords != 2 {
 		t.Fatalf("checksum validated = %d, want 2", s.ChecksumValidatedRecords)
 	}
@@ -99,6 +102,21 @@ func TestDecodeCoreTelemetry(t *testing.T) {
 	}
 }
 
+func TestResyncsAfterStructuralGarbage(t *testing.T) {
+	var b bytes.Buffer
+	writeRecord(&b, 1_000_000, mavlinkV1Frame(1, 1, 0, []byte{1, 2, 3}))
+	b.Write([]byte{0xde, 0xad, 0xbe, 0xef, 0x42})
+	writeRecord(&b, 2_000_000, mavlinkV1Frame(1, 1, 0, []byte{4, 5, 6}))
+
+	s, err := Inspect(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Records != 2 || s.ResyncEvents != 1 || s.SkippedBytes != 5 {
+		t.Fatalf("unexpected resync summary: %+v", s)
+	}
+}
+
 func TestRejectsInvalidCoreChecksum(t *testing.T) {
 	frame := mavlinkV1Frame(1, 1, msgGPSRawInt, make([]byte, 30))
 	frame[len(frame)-1] ^= 0xff
@@ -106,6 +124,27 @@ func TestRejectsInvalidCoreChecksum(t *testing.T) {
 	writeRecord(&b, 1_000_000, frame)
 	if _, err := Inspect(bytes.NewReader(b.Bytes())); !errors.Is(err, ErrChecksum) {
 		t.Fatalf("err = %v, want ErrChecksum", err)
+	}
+}
+
+func TestDoesNotResyncPastInvalidCoreChecksum(t *testing.T) {
+	bad := mavlinkV1Frame(1, 1, msgGPSRawInt, make([]byte, 30))
+	bad[len(bad)-1] ^= 0xff
+	var b bytes.Buffer
+	writeRecord(&b, 1_000_000, bad)
+	writeRecord(&b, 2_000_000, mavlinkV1Frame(1, 1, 0, []byte{1, 2, 3}))
+	if _, err := Inspect(bytes.NewReader(b.Bytes())); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("err = %v, want ErrChecksum", err)
+	}
+}
+
+func TestRejectsUnsupportedMAVLink2IncompatFlags(t *testing.T) {
+	frame := mavlinkV2Frame(1, 1, 0, []byte{1, 2, 3}, false)
+	frame[2] = 0x02
+	var b bytes.Buffer
+	writeRecord(&b, 1_000_000, frame)
+	if _, err := Inspect(bytes.NewReader(b.Bytes())); !errors.Is(err, ErrUnsupportedIncompatFlag) {
+		t.Fatalf("err = %v, want ErrUnsupportedIncompatFlag", err)
 	}
 }
 
