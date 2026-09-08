@@ -135,7 +135,12 @@ func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
 
 func healthInputFromTLOGDetailed(summary tlog.DetailedSummary) health.Input {
 	in := healthInputFromTLOGWithRoles(summary.Telemetry, summary.EndpointRoles)
-	accumulateTLOGLink(&in.Link, summary.Radio)
+	track := tlogTrackSamplesWithRoles(summary.Telemetry.GPS, summary.EndpointRoles)
+	radio := summary.Radio
+	if endpoint, ok := tlogTrackEndpoint(track); ok {
+		radio = filterTLOGRadioBySystem(summary.Radio, endpoint.systemID)
+	}
+	accumulateTLOGLink(&in.Link, radio)
 	return in
 }
 
@@ -222,6 +227,16 @@ func filterTLOGBatteryByEndpoint(samples []tlog.BatterySample, endpoint tlogEndp
 	filtered := make([]tlog.BatterySample, 0, len(samples))
 	for _, sample := range samples {
 		if sample.SystemID == endpoint.systemID && sample.ComponentID == endpoint.componentID {
+			filtered = append(filtered, sample)
+		}
+	}
+	return filtered
+}
+
+func filterTLOGRadioBySystem(samples []tlog.RadioSample, systemID uint8) []tlog.RadioSample {
+	filtered := make([]tlog.RadioSample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.SystemID == systemID {
 			filtered = append(filtered, sample)
 		}
 	}
