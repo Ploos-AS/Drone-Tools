@@ -102,6 +102,50 @@ func TestDecodeCoreTelemetry(t *testing.T) {
 	}
 }
 
+func TestMAVLink2ZeroPadsTruncatedTrailingCoreFields(t *testing.T) {
+	gps := make([]byte, 30)
+	binary.LittleEndian.PutUint64(gps[0:8], 2_000_000)
+	gps[8] = 3
+	binary.LittleEndian.PutUint32(gps[9:13], uint32(int32(580000000)))
+	binary.LittleEndian.PutUint32(gps[13:17], uint32(int32(70000000)))
+	binary.LittleEndian.PutUint32(gps[17:21], uint32(int32(123450)))
+	binary.LittleEndian.PutUint16(gps[25:27], 1250)
+
+	var b bytes.Buffer
+	writeRecord(&b, 2_100_000, mavlinkV2Frame(1, 1, msgGPSRawInt, gps[:27], false))
+	s, err := Inspect(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Telemetry.GPS) != 1 {
+		t.Fatalf("GPS samples = %d, want 1", len(s.Telemetry.GPS))
+	}
+	g := s.Telemetry.GPS[0]
+	if g.Satellites != 0 || math.Abs(g.SpeedMPS-12.5) > 1e-6 || math.Abs(g.Latitude-58) > 1e-9 {
+		t.Fatalf("unexpected truncated MAVLink2 sample: %+v", g)
+	}
+}
+
+func TestMAVLink1DoesNotZeroPadShortCorePayload(t *testing.T) {
+	gps := make([]byte, 27)
+	binary.LittleEndian.PutUint64(gps[0:8], 2_000_000)
+	gps[8] = 3
+	binary.LittleEndian.PutUint32(gps[9:13], uint32(int32(580000000)))
+	binary.LittleEndian.PutUint32(gps[13:17], uint32(int32(70000000)))
+	binary.LittleEndian.PutUint32(gps[17:21], uint32(int32(123450)))
+	binary.LittleEndian.PutUint16(gps[25:27], 1250)
+
+	var b bytes.Buffer
+	writeRecord(&b, 2_100_000, mavlinkV1Frame(1, 1, msgGPSRawInt, gps))
+	s, err := Inspect(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Telemetry.GPS) != 0 {
+		t.Fatalf("GPS samples = %d, want 0", len(s.Telemetry.GPS))
+	}
+}
+
 func TestResyncsAfterStructuralGarbage(t *testing.T) {
 	var b bytes.Buffer
 	writeRecord(&b, 1_000_000, mavlinkV1Frame(1, 1, 0, []byte{1, 2, 3}))
