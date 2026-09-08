@@ -50,8 +50,8 @@ func TestInfo(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["stage"] != "M3.1" {
-		t.Fatalf("stage = %v, want M3.1", response["stage"])
+	if response["stage"] != "M3.4" {
+		t.Fatalf("stage = %v, want M3.4", response["stage"])
 	}
 	if response["data_dir"] != dataDir {
 		t.Fatalf("data_dir = %v, want %s", response["data_dir"], dataDir)
