@@ -51,12 +51,12 @@ func flightHealthHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		input = healthInputFromDataFlash(summary.Telemetry)
 	case ".tlog":
-		summary, err := tlog.Inspect(file)
+		summary, err := tlog.InspectDetailed(file)
 		if err != nil {
 			http.Error(w, "invalid MAVLink TLOG file", http.StatusBadRequest)
 			return
 		}
-		input = healthInputFromTLOG(summary.Telemetry)
+		input = healthInputFromTLOGWithRoles(summary.Telemetry, summary.EndpointRoles)
 	default:
 		http.Error(w, "flight health currently supports .ulg, .bin and .tlog", http.StatusBadRequest)
 		return
@@ -129,8 +129,12 @@ func healthInputFromDataFlash(telemetry dataflash.Telemetry) health.Input {
 }
 
 func healthInputFromTLOG(telemetry tlog.Telemetry) health.Input {
+	return healthInputFromTLOGWithRoles(telemetry, nil)
+}
+
+func healthInputFromTLOGWithRoles(telemetry tlog.Telemetry, roles []tlog.EndpointRole) health.Input {
 	in := health.Input{}
-	track := tlogTrackSamples(telemetry.GPS)
+	track := tlogTrackSamplesWithRoles(telemetry.GPS, roles)
 	endpoint, haveEndpoint := tlogTrackEndpoint(track)
 
 	qualitySamples := telemetry.GPS
