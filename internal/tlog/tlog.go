@@ -21,9 +21,10 @@ const (
 )
 
 var (
-	ErrInvalidLog = errors.New("invalid MAVLink TLOG")
-	ErrTruncated  = errors.New("truncated MAVLink TLOG record")
-	ErrChecksum   = errors.New("invalid MAVLink checksum")
+	ErrInvalidLog              = errors.New("invalid MAVLink TLOG")
+	ErrTruncated               = errors.New("truncated MAVLink TLOG record")
+	ErrChecksum                = errors.New("invalid MAVLink checksum")
+	ErrUnsupportedIncompatFlag = errors.New("unsupported MAVLink2 incompatibility flags")
 )
 
 var coreCRCExtra = map[uint32]byte{
@@ -65,17 +66,20 @@ type Telemetry struct {
 }
 
 type Summary struct {
-	Format                   string         `json:"format"`
-	Records                  int            `json:"records"`
-	MAVLink1Records          int            `json:"mavlink1_records"`
-	MAVLink2Records          int            `json:"mavlink2_records"`
-	SignedRecords            int            `json:"signed_records"`
-	ChecksumValidatedRecords int            `json:"checksum_validated_records"`
-	StartTimestampUS         uint64         `json:"start_timestamp_us,omitempty"`
-	EndTimestampUS           uint64         `json:"end_timestamp_us,omitempty"`
-	MessageIDs               map[uint32]int `json:"message_ids"`
-	Endpoints                []Endpoint     `json:"endpoints,omitempty"`
-	Telemetry                Telemetry      `json:"telemetry"`
+	Format                     string         `json:"format"`
+	Records                    int            `json:"records"`
+	MAVLink1Records            int            `json:"mavlink1_records"`
+	MAVLink2Records            int            `json:"mavlink2_records"`
+	SignedRecords              int            `json:"signed_records"`
+	UnverifiedSignatureRecords int            `json:"unverified_signature_records"`
+	ChecksumValidatedRecords   int            `json:"checksum_validated_records"`
+	ResyncEvents               int            `json:"resync_events"`
+	SkippedBytes               int            `json:"skipped_bytes"`
+	StartTimestampUS           uint64         `json:"start_timestamp_us,omitempty"`
+	EndTimestampUS             uint64         `json:"end_timestamp_us,omitempty"`
+	MessageIDs                 map[uint32]int `json:"message_ids"`
+	Endpoints                  []Endpoint     `json:"endpoints,omitempty"`
+	Telemetry                  Telemetry      `json:"telemetry"`
 }
 
 func Inspect(r io.Reader) (Summary, error) {
@@ -91,20 +95,28 @@ func Inspect(r io.Reader) (Summary, error) {
 	endpoints := map[uint16]Endpoint{}
 
 	for offset := 0; offset < len(data); {
-		if len(data)-offset < 9 {
+		recordStart := offset
+		if len(data)-recordStart < 9 {
 			return Summary{}, ErrTruncated
 		}
-		timestamp := binary.BigEndian.Uint64(data[offset : offset+8])
-		offset += 8
+		timestamp := binary.BigEndian.Uint64(data[recordStart : recordStart+8])
+		frameStart := recordStart + 8
 
-		frameLength, msgID, sysID, compID, signed, version, err := frameInfo(data[offset:])
+		frameLength, msgID, sysID, compID, signed, version, err := frameInfo(data[frameStart:])
 		if err != nil {
-			return Summary{}, err
+			next, ok := findNextRecord(data, recordStart+1)
+			if !ok {
+				return Summary{}, err
+			}
+			s.ResyncEvents++
+			s.SkippedBytes += next - recordStart
+			offset = next
+			continue
 		}
-		if frameLength > len(data)-offset {
+		if frameLength > len(data)-frameStart {
 			return Summary{}, ErrTruncated
 		}
-		frame := data[offset : offset+frameLength]
+		frame := data[frameStart : frameStart+frameLength]
 		if extra, ok := coreCRCExtra[msgID]; ok {
 			if !validFrameChecksum(frame, version, extra) {
 				return Summary{}, fmt.Errorf("%w: message %d", ErrChecksum, msgID)
@@ -124,12 +136,13 @@ func Inspect(r io.Reader) (Summary, error) {
 		}
 		if signed {
 			s.SignedRecords++
+			s.UnverifiedSignatureRecords++
 		}
 		s.MessageIDs[msgID]++
 		key := uint16(sysID)<<8 | uint16(compID)
 		endpoints[key] = Endpoint{SystemID: sysID, ComponentID: compID}
 		decodeCoreTelemetry(&s.Telemetry, msgID, timestamp, framePayload(frame, version))
-		offset += frameLength
+		offset = frameStart + frameLength
 	}
 
 	if s.Records == 0 {
@@ -145,6 +158,21 @@ func Inspect(r io.Reader) (Summary, error) {
 		return s.Endpoints[i].SystemID < s.Endpoints[j].SystemID
 	})
 	return s, nil
+}
+
+func findNextRecord(data []byte, start int) (int, bool) {
+	for candidate := start; candidate+9 <= len(data); candidate++ {
+		magic := data[candidate+8]
+		if magic != mavlinkV1Magic && magic != mavlinkV2Magic {
+			continue
+		}
+		frameLength, _, _, _, _, _, err := frameInfo(data[candidate+8:])
+		if err != nil || frameLength > len(data)-(candidate+8) {
+			continue
+		}
+		return candidate, true
+	}
+	return 0, false
 }
 
 func validFrameChecksum(frame []byte, version int, extra byte) bool {
@@ -326,6 +354,9 @@ func frameInfo(data []byte) (length int, msgID uint32, sysID, compID uint8, sign
 		payloadLength := int(data[1])
 		if len(data) < 10 {
 			return 0, 0, 0, 0, false, 0, ErrTruncated
+		}
+		if unsupported := data[2] &^ signedFlag; unsupported != 0 {
+			return 0, 0, 0, 0, false, 0, fmt.Errorf("%w: 0x%02x", ErrUnsupportedIncompatFlag, unsupported)
 		}
 		signed = data[2]&signedFlag != 0
 		length = 12 + payloadLength
